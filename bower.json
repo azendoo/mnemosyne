@@ -1,0 +1,30 @@
+{
+  "name": "mnemosyne",
+  "version": "0.0.1",
+  "homepage": "https://github.com/azendoo/mnemosyne",
+  "authors": [
+    "ahanriat <ahanriat@gmail.com>"
+  ],
+  "description": "Make your app offline",
+  "keywords": [
+    "store",
+    "offline",
+    "backbone",
+    "cache"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "almond": "0.2.9",
+    "localforage" : "0.8.1"
+  },
+  "devDependencies": {
+    "backbone": "1.1.2",
+    "requirejs": "2.1.5",
+    "mocha": "1.17.1",
+    "sinon-chai": "2.4.0",
+    "chai":"1.8.1",
+    "jquery":"2.1.0",
+    "sinon": "1.9.1"
+  }
+
+}
