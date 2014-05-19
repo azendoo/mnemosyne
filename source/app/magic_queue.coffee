@@ -5,7 +5,7 @@
   except for getting the queue.
 
   - TODO -
-
+  db persistence
 
 ###
 
@@ -14,8 +14,12 @@ removeValue = (ctx, key) ->
   delete  ctx.dict[key]
   return value
 
+# TODO move the key to the constructor
+KEY: 'mnemosyne.pendingRequests'
 
 module.exports = class MagicQueue
+
+
 
   # Keep the order state, only store keys.
   orderedKeys: []
@@ -23,17 +27,17 @@ module.exports = class MagicQueue
   # Store all value with constant access.
   dict: {}
 
-  pushHead: (key, value) ->
+  addHead: (key, value) ->
     @orderedQueue.push(key)
     @dict[key] = value
 
 
-  pushTail: (key, value) ->
+  addTail: (key, value) ->
     @orderedKeys.unshift(key)
     @dict[key] = value
 
 
-  popHead: () ->
+  retrieveHead: () ->
     return null if @orderedKeys.length is 0
     key = @orderedKeys.pop()
     value = removeValue(key)
@@ -42,7 +46,7 @@ module.exports = class MagicQueue
     return value
 
 
-  popTail: () ->
+  retrieveTail: () ->
     return null if @orderedKeys.length is 0
     key = @orderedKeys.shift()
     value = removeValue(key)
@@ -51,13 +55,16 @@ module.exports = class MagicQueue
     return value
 
 
-  removeItem: (key) ->
+  retrieveItem: (key) ->
     @dict[key]?.removed = true
 
 
   getItem: (key) ->
     @dict[key]
 
+  # TODO improve complexity
+  isEmpty: ->
+    return @getQueue().length is 0
 
   clear: ->
     @orderedKeys = []
@@ -67,6 +74,7 @@ module.exports = class MagicQueue
   getQueue: () ->
     queue = []
     for key in @orderedKeys
-      queue.push(@dict[key])
+      if @dict[key]? and not @dict[key].removed
+        queue.push(@dict[key])
 
     return queue

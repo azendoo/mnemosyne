@@ -3,7 +3,6 @@ RequestManager = require "./request_manager"
 ###
   TODO
   * set db infos
-  * extend public methods of RequestManager
   * documentation
 ###
 
@@ -58,6 +57,7 @@ serverRead = (ctx, model, options, fallbackItem, deferred) ->
     deferred.reject.apply(this, arguments)
 
 
+
 load = (ctx, key) ->
   deferred = $.Deferred()
 
@@ -93,6 +93,14 @@ cacheWrite = (ctx, model) ->
   )
 
   return deferred
+
+
+serverWrite = (ctx, method, model, options, deferred ) ->
+  ctx.safeSync(method, model, options)
+  .done ->
+    deferred.resolve.apply this, args
+  .fail ->
+    deferred.reject.apply this, args
 
 
 ###
@@ -176,6 +184,6 @@ module.exports = class Mnemosyne extends RequestManager
       when 'read'
         read(@, model, options, deferred)
       else
-        serverSync(@, method, model, options, null, deferred)
+        serverWrite(@, method, model, options, deferred)
 
     return deferred

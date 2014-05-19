@@ -1,122 +1,119 @@
 MagicQueue = require "./magic_queue"
 
 ###
-	TODO
-	* limit the number of pending requests ?
-	* manage the database limit
-	* documentation
-	* set models status according to events, and update the cache
-	* manage connectivity
-	* request db persistence
+  TODO
+  * limit the number of pending requests ?
+  * manage the database limit
+  * documentation
+  * set models status according to events, and update the cache
+  * manage connectivity
+  * request db persistence
+  * use event map
+  * set default values for MAX et MIN interval
+  * manage concurrent call to consume
 ###
 
 store = localforage
 defaultEventMap =
-	'syncing'     : 'syncing'
-	'pending'     : 'pending'
-	'synced'      : 'synced'
-	'unsynced'    : 'unsynced'
+  'syncing'     : 'syncing'
+  'pending'     : 'pending'
+  'synced'      : 'synced'
+  'unsynced'    : 'unsynced'
+
+MAX_INTERVAL= 64000 # 64 seconds
+MIN_INTERVAL= 250   # 250ms
 
 ###
-	------- Private methods -------
+  ------- Private methods -------
 ###
-
-deleteRequest = (ctx, request) ->
-	store.removeItem(request.url)
-	delete ctx.pendingKeys[request.url]
-
 
 cancelRequest = (ctx, request) ->
-	request.model.trigger(ctx.eventMap['unsynced'])
-	deleteRequest(ctx, request)
+  request.model.trigger(ctx.eventMap['unsynced'])
+  store.removeItem(request.key)
 
 
 pushRequest = (ctx, request) ->
-	return if not request?
+  return if not request?
 
-	ctx.pendingRequests.push(request)
-	clearTimeout(ctx.timeout)
-	interval = 500
+  ctx.pendingRequests.addHead(request)
+  clearTimeout(ctx.timeout)
+  ctx.timeout = null
+  ctx.interval = MIN_INTERVAL
 
-	return @_consume(ctx)
+  return consume(ctx)
 
 
 consume = (ctx) ->
-	deferred = $.deferred()
+  deferred = $.deferred()
 
-	req = ctx.pendingRequests.pop()
-	return deferred.reject() if not req?
+  req = ctx.pendingRequests.removeHead()
+  return deferred.reject() if not req?
 
-	Backbone.sync(req.method, req.model, req.options)
-	.done ->
-		request.model.trigger('sent')
-		deferred.resolve.apply(this, arguments)
-	.fail ->
-		ctx.pendingRequests.unshift(req)
-		request.model.trigger('request:pending')
-		if ctx._interval < ctx._MAX_REQUEST_INTERVAL * 1000 # 60 seconds
-			ctx._interval = ctx._interval * 2
-		ctx._timeout  = setTimeout( (-> consume(ctx) ), ctx._interval)
-		deferred.reject.apply(this, arguments)
+  Backbone.sync(req.method, req.model, req.options)
+  .done ->
+    request.model.trigger('synced')
+    deferred.resolve.apply(this, arguments)
+    ctx.interval = MIN_INTERVAL
+  .fail ->
+    ctx.pendingRequests.addTail(req.key, request)
+    request.model.trigger('pending')
+    if ctx.interval < MAX_INTERVAL
+      ctx.interval = ctx.interval * 2
+    deferred.reject.apply(this, arguments)
+  .always ->
+    ctx.timeout  = setTimeout( (-> consume(ctx) ), ctx.interval)
 
-	return deferred
+  return deferred
 
 
 
 ###
-	------- Public methods -------
+  ------- Public methods -------
 ###
 
 module.exports = class RequestManager
 
-	MAX_REQUEST_INTERVAL: 60 #seconds
-	KEY: 'mnemosyne.pendingRequests'
 
-	###
-		request:
-			method
-			model
-			options
-			url // replace by key ?
-	###
+  ###
+    request:
+      method
+      model
+      options
+      key
+  ###
 
-	constructor: (eventMap = {})->
-		@eventMap = _.extend(defaultEventMap, eventMap)
-		store.getItem(@KEY)
-		.done (values) =>
-			if (values instanceof Array)
-				@pendingRequests = values.concat(@pendingRequests)
+  constructor: (eventMap = {}) ->
+    @eventMap = _.extend(defaultEventMap, eventMap)
+    @pendingRequests = new MagicQueue()
 
 
-	clear: ->
-		@cancelAllPendingRequests()
+  clear: ->
+    @pendingRequests.getQueue().map((request) => cancelRequest(@, request))
+    @interval = MIN_INTERVAL
+    @pendingRequests.clear()
 
 
   getPendingRequests: ->
-  	return @pendingRequests
+    return @pendingRequests.getQueue()
 
 
-  retryRequest: (index) ->
-		request = @pendingRequests.splice(index, 1)[0]
-		pushRequest(@, request)
+  retrySync: ->
+    return if @pendingRequests.isEmpty()
+    @interval = MIN_INTERVAL
+    consume(@)
 
 
-  cancelAllPendingRequests:  ->
-  	@pendingRequests.map((request) => cancelRequest(@, request))
-  	@pendingRequests = []
-		@pendingKey = {}
+  cancelPendingRequest: (key) ->
+    request = @pendingRequests.remove(key)
+    return if not request?
+    cancelRequest(@, request)
 
 
-  cancelPendingRequest: (index) ->
-  	request = @pendingRequests.splice(index, 1)
-  	return if not request?
-		cancelRequest(@, request)
+  safeSync: (method, model, options = {}) ->
+    request = {}
+    request.method  = method
+    request.model   = model
+    request.options = options
+    request.key     = model.getKey()
 
-
-  sync: (method, model, options) ->
-  	request = {}
-  	request.method  = method
-  	request.model   = model
-  	request.options = options
-
-  	return @pushRequest(@, request)
+    return @pushRequest(@, request)
