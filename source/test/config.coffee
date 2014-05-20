@@ -46,11 +46,11 @@ require files, ->
   chai = require("chai")
   sinonChai = require("sinon-chai")
 
-  should = chai.should()
+  chai.should()
 
   chai.use(sinonChai);
   mocha.setup
-    globals: ['should', 'sinon']
+    globals: ['sinon']
 
   require specs, ->
     describe '', ->

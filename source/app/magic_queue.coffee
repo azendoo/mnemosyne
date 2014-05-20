@@ -1,9 +1,6 @@
 ###
   - MagicQueue -
 
-  Provides constant access to all operation,
-  except for getting the queue.
-
   - TODO -
   db persistence
 
@@ -19,8 +16,6 @@ KEY: 'mnemosyne.pendingRequests'
 
 module.exports = class MagicQueue
 
-
-
   # Keep the order state, only store keys.
   orderedKeys: []
 
@@ -28,11 +23,13 @@ module.exports = class MagicQueue
   dict: {}
 
   addHead: (key, value) ->
-    @orderedQueue.push(key)
+    @retrieveItem(key)
+    @orderedKeys.push(key)
     @dict[key] = value
 
 
   addTail: (key, value) ->
+    @retrieveItem(key)
     @orderedKeys.unshift(key)
     @dict[key] = value
 
@@ -40,7 +37,7 @@ module.exports = class MagicQueue
   retrieveHead: () ->
     return null if @orderedKeys.length is 0
     key = @orderedKeys.pop()
-    value = removeValue(key)
+    value = removeValue(@, key)
     if not value? or value.removed is true
       return @popHead()
     return value
@@ -49,14 +46,17 @@ module.exports = class MagicQueue
   retrieveTail: () ->
     return null if @orderedKeys.length is 0
     key = @orderedKeys.shift()
-    value = removeValue(key)
+    value = removeValue(@, key)
     if not value? or value.removed is true
       return @popTail()
     return value
 
 
   retrieveItem: (key) ->
-    @dict[key]?.removed = true
+    indexKey = @orderedKeys.indexOf(key)
+    return null if indexKey is -1
+    @orderedKeys.splice(indexKey, 1)
+    return removeValue(@, key)
 
 
   getItem: (key) ->
