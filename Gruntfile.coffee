@@ -36,14 +36,6 @@ module.exports = (grunt) ->
           src: ['**']
           dest: "<%= dir.tmp %><%= dir.bower %>"
         ]
-      sinon:
-        files: [
-          expand: true
-          cwd: 'node_modules/sinon'
-          src: ['**']
-          dest: "<%= dir.tmp %><%= dir.bower %>sinon"
-        ]
-
 
     coffee:
       compile:
@@ -62,12 +54,6 @@ module.exports = (grunt) ->
         cwd    : "<%= dir.tmp %>"
         src    : ['app/**/*.js']
         dest   : "<%= dir.tmp %>"
-      initCustomSinon:
-        expand : true
-        cwd    : "<%= dir.tmp %><%= dir.bower %>"
-        src    : "custom_sinon.js"
-        dest   : "<%= dir.tmp %><%= dir.bower %>"
-
 
     wrap:
       test:
@@ -139,18 +125,6 @@ module.exports = (grunt) ->
           dest: "<%= dir.tmp %>test/"
         ]
 
-
-    concat:
-      initCustomSinon:
-        src  : [
-          'vendor/sinon/sinon_start.js'
-          'node_modules/sinon/lib/sinon.js'
-          'node_modules/sinon/lib/sinon/util/event.js'
-          'node_modules/sinon/lib/sinon/util/fake_xml_http_request.js'
-          'vendor/sinon/sinon_end.js'
-        ]
-        dest : "<%= dir.tmp %><%= dir.bower %>custom_sinon.js"
-
     mocha:
       all: ["<%= dir.tmp %>test/index.html"]
       options:
@@ -219,7 +193,6 @@ module.exports = (grunt) ->
   grunt.loadNpmTasks "grunt-amd-wrap"
   grunt.loadNpmTasks "grunt-renaming-wrap"
   grunt.loadNpmTasks 'grunt-file-process'
-  grunt.loadNpmTasks "grunt-contrib-concat"
   grunt.loadNpmTasks "grunt-contrib-requirejs"
   grunt.loadNpmTasks "grunt-git-describe"
   grunt.loadNpmTasks "grunt-banner"
@@ -270,11 +243,10 @@ module.exports = (grunt) ->
     grunt.event.once 'git-describe', -> grunt.option('gitRevision', rev)
     grunt.task.run('git-describe')
 
-  grunt.registerTask "initCustomSinon", ["concat:initCustomSinon"]
   grunt.registerTask "compileTest", ["amdwrap:compile", "wrap:test", "process"]
 
   grunt.registerTask "default", ["test"]
-  grunt.registerTask "compile", ["clean:tmp", "coffee", "copy", "initCustomSinon"]
+  grunt.registerTask "compile", ["clean:tmp", "coffee", "copy"]
   grunt.registerTask "build", ["clean:dist", "compile", "requirejs", "wrap:dist", "usebanner"]
 
   grunt.registerTask "start", ["compile", "compileTest", "watch"]

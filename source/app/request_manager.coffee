@@ -1,4 +1,5 @@
-MagicQueue = require "./magic_queue"
+MagicQueue = require "../app/magic_queue"
+localforage = require "localforage"
 
 ###
   TODO

@@ -2,8 +2,9 @@ require.config
   paths:
     'chai'         : '../components/chai/chai'
     'sinon-chai'   : '../components/sinon-chai/lib/sinon-chai'
-    'sinon'        : '../components/sinon/pkg/sinon-1.7.3'
+    'sinon'        : '../node_modules/sinon/pkg/sinon-1.10.0'
     'jquery'       : '../components/jquery/dist/jquery'
+    'localforage'  : '../components/localforage/dist/localforage'
     'mnemosyne'    : '../app/mnemosyne'
   shim:
     'sinon':

@@ -1,4 +1,5 @@
-RequestManager = require "./request_manager"
+RequestManager = require "../app/request_manager"
+localforage    = require "localforage"
 
 ###
   TODO

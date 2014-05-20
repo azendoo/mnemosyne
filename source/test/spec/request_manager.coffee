@@ -8,14 +8,12 @@ describe 'Request Manager specifications', ->
     requestManager.clear()
 
     model1 = new Backbone.model()
-    model1.getKey() = -> 'model.1'
+    model1.getKey = -> 'model.1'
     model2 = new Backbone.model()
-    model2.getKey() = -> 'model.2'
+    model2.getKey = -> 'model.2'
     model3 = new Backbone.model()
-    model3.getKey() = -> 'model.3'
+    model3.getKey = -> 'model.3'
 
-  it 'should be ok', (done) ->
-    done()
 
   describe 'Spec clear', ->
     it 'should stop the scheduler when the queue is empty', ->
@@ -23,7 +21,7 @@ describe 'Request Manager specifications', ->
       requestManager.safeSync('write', model1)
       expect(requestManager.timeout).not.to.be.equal(null)
       requestManager.clear()
-      expect(requestManager.timeout)to.be.equal(null)
+      expect(requestManager.timeout).to.be.equal(null)
 
     it 'should reset the time interval when the queue is empty', ->
       expect(requestManager.interval).to.be.equal(250)
@@ -31,7 +29,7 @@ describe 'Request Manager specifications', ->
       # autorespond server error
       expect(requestManager.interval).to.be.greater(400)
       requestManager.clear()
-      expect(requestManager.interval)to.be.equal(250)
+      expect(requestManager.interval).to.be.equal(250)
 
 
   describe 'Spec safeSync', ->
@@ -136,8 +134,8 @@ describe 'Request Manager specifications', ->
       requestManager.safeSync('write', model1)
       # autorespond server error
       requestManager.safeSync('update', model1)
-      .reject
+      .reject ->
         expect(requestManager.interval).to.be.greater(400)
         requestManager.retrySync()
-        expect(requestManager.interval)to.be.equal(250)
+        expect(requestManager.interval).to.be.equal(250)
         done()

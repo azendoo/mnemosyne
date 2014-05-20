@@ -1,4 +1,4 @@
 require.config
   name: 'mnemosyne'
   paths:
-    'localforage'      : '../components/dist/localforage.js'
+    'localforage'      : '../components/localforage/dist/localforage.js'

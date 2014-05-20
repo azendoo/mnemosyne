@@ -30,6 +30,7 @@
     "grunt-file-process"      : "0.2.2",
     "grunt-amd-wrap"          : "1.0.1",
     "grunt-git-describe"      : "2.3.2",
-    "grunt-banner"            : "0.2.1"
+    "grunt-banner"            : "0.2.1",
+    "sinon"                   : "1.10.0"
   }
 }
