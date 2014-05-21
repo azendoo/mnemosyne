@@ -10,7 +10,6 @@ Backbone    = require "backbone"
   * set models status according to events, and update the cache
   * manage connectivity
   * request db persistence
-  * use event map
   * set default values for MAX et MIN interval
   * manage concurrent call to consume
 ###
@@ -29,6 +28,12 @@ MIN_INTERVAL= 250   # 250ms
   ------- Private methods -------
 ###
 
+resetTimer = (ctx) ->
+  clearTimeout(ctx.timeout)
+  ctx.timeout = null
+  ctx.interval = MIN_INTERVAL
+
+
 cancelRequest = (ctx, request) ->
   request.model.trigger(ctx.eventMap['unsynced'])
   store.removeItem(request.key)
@@ -37,10 +42,8 @@ cancelRequest = (ctx, request) ->
 pushRequest = (ctx, request) ->
   return if not request?
 
-  ctx.pendingRequests.addHead(request)
-  clearTimeout(ctx.timeout)
-  ctx.timeout = null
-  ctx.interval = MIN_INTERVAL
+  ctx.pendingRequests.addHead(request.key, request)
+  resetTimer(ctx)
 
   return consume(ctx)
 
@@ -48,22 +51,20 @@ pushRequest = (ctx, request) ->
 consume = (ctx) ->
   deferred = $.Deferred()
 
-  req = ctx.pendingRequests.retrieveHead()
-  return deferred.reject() if not req?
-
-  Backbone.sync(req.method, req.model, req.options)
+  request = ctx.pendingRequests.retrieveHead()
+  return deferred.reject() if not request?
+  Backbone.sync(request.method, request.model, request.options)
   .done ->
-    request.model.trigger('synced')
-    deferred.resolve.apply(this, arguments)
+    request.model.trigger(ctx.eventMap['synced'])
     ctx.interval = MIN_INTERVAL
   .fail ->
-    ctx.pendingRequests.addTail(req.key, request)
-    request.model.trigger('pending')
+    ctx.pendingRequests.addTail(request.key, request)
+    request.model.trigger(ctx.eventMap['pending'])
     if ctx.interval < MAX_INTERVAL
       ctx.interval = ctx.interval * 2
-    deferred.reject.apply(this, arguments)
   .always ->
     ctx.timeout  = setTimeout( (-> consume(ctx) ), ctx.interval)
+    deferred.resolve.apply(this, arguments)
 
   return deferred
 
@@ -87,13 +88,12 @@ module.exports = class RequestManager
   constructor: (eventMap = {}) ->
     @eventMap = _.extend(defaultEventMap, eventMap)
     @pendingRequests = new MagicQueue()
-    @interval = MIN_INTERVAL
+    resetTimer(@)
+
 
   clear: ->
     @pendingRequests.getQueue().map((request) => cancelRequest(@, request))
-    @interval = MIN_INTERVAL
-    clearTimeout(@timeout)
-    @timeout = null
+    resetTimer(@)
     @pendingRequests.clear()
 
 
@@ -102,13 +102,12 @@ module.exports = class RequestManager
 
 
   retrySync: ->
-    return if @pendingRequests.isEmpty()
-    @interval = MIN_INTERVAL
+    resetTimer(@)
     consume(@)
 
 
   cancelPendingRequest: (key) ->
-    request = @pendingRequests.remove(key)
+    request = @pendingRequests.retrieveItem(key)
     return if not request?
     cancelRequest(@, request)
 
