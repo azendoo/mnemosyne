@@ -8,7 +8,6 @@ describe 'Request Manager specifications', ->
 
   setUpServerResponse = ->
     server.respondWith (xhr) ->
-      console.log ">>>>"
       xhr.respond(
         200
         "Content-Type": "application/json"
