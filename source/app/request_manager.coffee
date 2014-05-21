@@ -1,5 +1,6 @@
 MagicQueue = require "../app/magic_queue"
 localforage = require "localforage"
+Backbone    = require "backbone"
 
 ###
   TODO
@@ -45,9 +46,9 @@ pushRequest = (ctx, request) ->
 
 
 consume = (ctx) ->
-  deferred = $.deferred()
+  deferred = $.Deferred()
 
-  req = ctx.pendingRequests.removeHead()
+  req = ctx.pendingRequests.retrieveHead()
   return deferred.reject() if not req?
 
   Backbone.sync(req.method, req.model, req.options)
@@ -86,11 +87,13 @@ module.exports = class RequestManager
   constructor: (eventMap = {}) ->
     @eventMap = _.extend(defaultEventMap, eventMap)
     @pendingRequests = new MagicQueue()
-
+    @interval = MIN_INTERVAL
 
   clear: ->
     @pendingRequests.getQueue().map((request) => cancelRequest(@, request))
     @interval = MIN_INTERVAL
+    clearTimeout(@timeout)
+    @timeout = null
     @pendingRequests.clear()
 
 
@@ -117,4 +120,4 @@ module.exports = class RequestManager
     request.options = options
     request.key     = model.getKey()
 
-    return @pushRequest(@, request)
+    return pushRequest(@, request)

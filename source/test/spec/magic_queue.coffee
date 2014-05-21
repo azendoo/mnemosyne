@@ -17,28 +17,28 @@ describe 'Magic Queue specifications', ->
     it 'should retrieve the head object', (done) ->
       populateMagicQueue()
       value = magicQueue.retrieveHead()
-      value.should.be.equal(10)
+      expect(value).to.equal(10)
 
       value = magicQueue.retrieveHead()
-      value.should.be.equal(9)
+      expect(value).to.equal(9)
 
       magicQueue.addHead('key',17)
       value = magicQueue.retrieveHead()
-      value.should.be.equal(17)
+      expect(value).to.equal(17)
 
       done()
 
     it 'should retrieve the tail object', (done) ->
       populateMagicQueue()
       value = magicQueue.retrieveTail()
-      value.should.be.equal(1)
+      expect(value).to.equal(1)
 
       value = magicQueue.retrieveTail()
-      value.should.be.equal(2)
+      expect(value).to.equal(2)
 
       magicQueue.addTail('key',17)
       value = magicQueue.retrieveTail()
-      value.should.be.equal(17)
+      expect(value).to.equal(17)
 
       done()
 
@@ -47,25 +47,24 @@ describe 'Magic Queue specifications', ->
     it 'should retrieve the object', (done) ->
       populateMagicQueue()
       value = magicQueue.retrieveItem("key.5")
-      value.should.be.equal(5)
+      expect(value).to.equal(5)
 
       done()
 
     it 'should return null if the object has already been retrieved', (done) ->
       populateMagicQueue()
       value = magicQueue.retrieveItem("key.5")
-      value.should.be.equal(5)
+      expect(value).to.equal(5)
 
       value = magicQueue.retrieveItem("key.5")
-      # should.equal(value, undefined)
-      # should.not.exist(value)
+      expect(value).to.be.null
 
       done()
 
     it 'should retrieve null if the object is not in the queue', (done) ->
       populateMagicQueue()
       value = magicQueue.retrieveItem("key.92")
-      # should.equal(value, undefined)
+      expect(value).to.be.null
 
       done()
 
@@ -74,17 +73,17 @@ describe 'Magic Queue specifications', ->
     it 'should retrieve the object', (done) ->
       populateMagicQueue()
       value = magicQueue.getItem("key.5")
-      value.should.be.equal(5)
+      expect(value).to.equal(5)
 
       done()
 
     it 'should keep the value in the queue', (done) ->
       populateMagicQueue()
       value = magicQueue.getItem("key.5")
-      value.should.be.equal(5)
+      expect(value).to.equal(5)
 
       value = magicQueue.getItem("key.5")
-      value.should.be.equal(5)
+      expect(value).to.equal(5)
 
       done()
 
@@ -93,22 +92,22 @@ describe 'Magic Queue specifications', ->
     it 'should return an empty array if the queue has been cleared', (done) ->
       populateMagicQueue()
       queue = magicQueue.getQueue()
-      queue.should.not.be.empty
+      expect(queue).not.be.empty
 
       magicQueue.clear()
       queue = magicQueue.getQueue()
-      queue.should.be.empty
+      expect(queue).to.be.empty
 
       done()
 
     it 'should always retrieve null if the queue has been cleared', (done) ->
       populateMagicQueue()
       value = magicQueue.getItem("key.5")
-      value.should.be.equal(5)
+      expect(value).to.equal(5)
 
       magicQueue.clear()
       value = magicQueue.getItem("key.5")
-      #should.equal(value, undefined)
+      expect(value).to.be.null
 
       done()
 
@@ -119,8 +118,7 @@ describe 'Magic Queue specifications', ->
       populateMagicQueue()
       queue = magicQueue.getQueue()
 
-      equality = !( queue < expectedQueue || expectedQueue < queue )
-      equality.should.be.true
+      expect(queue).to.eql(expectedQueue)
 
       done()
 
@@ -132,8 +130,6 @@ describe 'Magic Queue specifications', ->
       magicQueue.addHead("key.11",11)
       queue = magicQueue.getQueue()
 
-      queue.length.should.be.equal(expectedQueue.length)
-      equality = !( queue < expectedQueue || expectedQueue < queue )
-      equality.should.be.true
+      expect(queue).to.eql(expectedQueue)
 
       done()

@@ -5,6 +5,8 @@ require.config
     'sinon'        : '../node_modules/sinon/pkg/sinon-1.10.0'
     'jquery'       : '../components/jquery/dist/jquery'
     'localforage'  : '../components/localforage/dist/localforage'
+    'underscore'   : '../components/underscore/underscore'
+    'backbone'     : '../components/backbone/backbone'
     'mnemosyne'    : '../app/mnemosyne'
   shim:
     'sinon':
@@ -15,6 +17,7 @@ files = [
   'chai'
   'sinon-chai'
   'sinon'
+  'backbone'
 ]
 
 
@@ -46,8 +49,8 @@ require files, ->
   chai = require("chai")
   sinonChai = require("sinon-chai")
 
-  chai.should()
-
+  # chai.should()
+  window.expect = chai.expect
   chai.use(sinonChai);
   mocha.setup
     globals: ['sinon']

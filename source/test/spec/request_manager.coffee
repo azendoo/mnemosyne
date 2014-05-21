@@ -1,27 +1,33 @@
 describe 'Request Manager specifications', ->
 
   requestManager =  null
-  model = null
+  model1 = null
+  model2 = null
+  model3 = null
 
-  beforeEach: ->
+  beforeEach ->
+    RequestManager = require '../app/request_manager'
+    Backbone       = require 'backbone'
     requestManager = new RequestManager()
     requestManager.clear()
 
-    model1 = new Backbone.model()
+    model1 = new Backbone.Model()
     model1.getKey = -> 'model.1'
-    model2 = new Backbone.model()
+    model2 = new Backbone.Model()
     model2.getKey = -> 'model.2'
-    model3 = new Backbone.model()
+    model3 = new Backbone.Model()
     model3.getKey = -> 'model.3'
 
 
   describe 'Spec clear', ->
     it 'should stop the scheduler when the queue is empty', ->
-      expect(requestManager.timeout).to.be.equal(null)
+      expect(requestManager.timeout).to.be.null
+
       requestManager.safeSync('write', model1)
-      expect(requestManager.timeout).not.to.be.equal(null)
+      requestManager.timeout.should.not.equal(null)
       requestManager.clear()
-      expect(requestManager.timeout).to.be.equal(null)
+      # should.not.exist(requestManager.timeout)
+
 
     it 'should reset the time interval when the queue is empty', ->
       expect(requestManager.interval).to.be.equal(250)

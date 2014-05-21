@@ -34,21 +34,17 @@ module.exports = class MagicQueue
     @dict[key] = value
 
 
-  retrieveHead: () ->
+  retrieveHead: ->
     return null if @orderedKeys.length is 0
     key = @orderedKeys.pop()
     value = removeValue(@, key)
-    if not value? or value.removed is true
-      return @popHead()
     return value
 
 
-  retrieveTail: () ->
+  retrieveTail: ->
     return null if @orderedKeys.length is 0
     key = @orderedKeys.shift()
     value = removeValue(@, key)
-    if not value? or value.removed is true
-      return @popTail()
     return value
 
 
@@ -60,7 +56,7 @@ module.exports = class MagicQueue
 
 
   getItem: (key) ->
-    @dict[key]
+    @dict[key] or null
 
   # TODO improve complexity
   isEmpty: ->
