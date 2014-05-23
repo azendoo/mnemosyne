@@ -42,6 +42,11 @@ defaultConstants =
 
 
 read = (ctx, model, options, deferred) ->
+
+  if not model.getKey?()? or not model.constants.cache
+    console.log "Cache forbidden"
+    return serverRead(ctx, model, options, null, deferred)
+
   console.log "Try loading value from cache"
   load(ctx, model.getKey())
   .done (item) ->
@@ -204,7 +209,7 @@ module.exports = class Mnemosyne extends RequestManager
     .done (item) ->
       deferred.resolve(item.value)
     .fail -> deferred.reject()
-    
+
     return deferred
 
 

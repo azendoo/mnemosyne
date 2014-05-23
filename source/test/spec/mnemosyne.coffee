@@ -115,7 +115,7 @@ module.exports = describe 'Mnemosyne specifications', ->
               mnemosyne.cacheRead(model.getKey())
               .done (value) ->
                 expect(value).to.not.equal(17)
-                done()
+
 
 
         describe '"allowExpiredCache" set to false', ->
@@ -144,7 +144,6 @@ module.exports = describe 'Mnemosyne specifications', ->
                 .done (value) ->
                   expect(value).to.not.equal(17)
                   done()
-
 
 
       describe 'No cache', ->
@@ -227,38 +226,128 @@ module.exports = describe 'Mnemosyne specifications', ->
 
 
   describe 'Offline', ->
-    it 'should trigger "syncing" event on model'
+    beforeEach ->
+      serverAutoRespondError()
+
+    it 'should trigger "syncing" event on model', (done) ->
+      model.on 'syncing', -> done()
+      model.save()
+
     describe 'Read value', ->
       describe 'Cache valid', ->
-        it 'should trigger "synced" event on model'
-        it 'should get data from cache'
-        it 'should not try to get data from server'
+        beforeEach (done) ->
+          model.setTime(52)
+          mnemosyne.cacheWrite(model)
+          .done -> done()
+
+        it 'should trigger "synced" event on model', (done) ->
+          model.on 'synced', -> done()
+          model.fetch()
+
+        it 'should get data from cache', (done) ->
+          model.setTime(17)
+          model.fetch()
+          .done ->
+            expect(model.getTime()).to.equal(52)
+            done()
+
+        it 'should not try to get data from server', (done) ->
+          model.fetch()
+          .done ->
+            expect(serverSpy).not.called
+            done()
 
 
       describe 'Cache expired', ->
-        it 'should trigger "synced" event on model'
-        it 'should get data from cache'
+        beforeEach (done) ->
+          model.constants = {cache : true, ttl: 0}
+          model.setTime(19)
+          mnemosyne.cacheWrite(model)
+          .done -> done()
+
+        it 'should trigger "synced" event on model', (done) ->
+          model.on 'synced', -> done()
+          model.fetch()
+
+        it 'should get data from cache', (done) ->
+          model.setTime(52)
+          model.fetch()
+          .done ->
+            expect(model.getTime()).equal(19)
+            done()
 
 
         describe '"allowExpiredCache" set to false', ->
-          it 'should trigger "unsynced" event on model'
-          it 'should not get data from cache'
-          it 'should unsynced the model'
+          beforeEach ->
+            model.constants.allowExpiredCache = false
+
+          it 'should trigger "unsynced" event on model', (done) ->
+            model.on "unsynced", -> done()
+            model.fetch()
+
+          it 'should not use data from cache', (done) ->
+            model.setTime(52)
+            model.fetch()
+            .fail ->
+              expect(model.getTime()).equal(52)
+              done()
+
 
       describe 'No cache', ->
-        it 'should trigger "unsynced" event on model'
-        it 'should unsynced the model'
+        # model.getTime() should never be 0
+        beforeEach (done) ->
+          model.setTime(0)
+          mnemosyne.cacheWrite(model)
+          .done ->
+            model.constants = {cache : false}
+            done()
+
+        it 'should trigger "unsynced" event on model', (done) ->
+          model.on 'unsynced', -> done()
+          model.fetch()
 
     describe 'Write value', ->
       describe 'Cache', ->
-        it 'should trigger "pending" event on model'
-        it 'should write the data in cache and set the state to pending'
+        it 'should trigger "pending" event on model', (done)->
+          model.on 'pending', -> done()
+          model.save()
 
+        # TODO write data in cache
+        it 'should write the data in cache', (done) ->
+          model.setTime(13)
+          model.save()
+          .done ->
+            mnemosyne.cacheRead(model.getKey())
+            .done (value) ->
+              expect(value.time).to.equal(13)
+
+        it 'should push the request in the queue', (done) ->
+          model.save()
+          .done ->
+            expect(mnemosyne.getPendingRequests()).not.be.empty
+            done()
 
       describe 'No cache', ->
-        it 'should trigger "pending" event on model'
-        it 'should write the data in cache and set the state to pending'
-        it 'should set the state to pending'
+        # model.getTime() should never be 0
+        beforeEach (done) ->
+          model.setTime(0)
+          mnemosyne.cacheWrite(model)
+          .done ->
+            model.constants = {cache : false}
+            done()
+
+        it 'should trigger "pending" event on model', (done) ->
+          model.on 'pending', -> done()
+          model.save()
+
+        it 'should write the data in cache', (done) ->
+          model.setTime(13)
+          model.save()
+          .done ->
+            mnemosyne.cacheRead(model.getKey())
+            .done (value) ->
+              expect(value.time).to.equal(13)
+
 
       describe 'On connection recovered', ->
         it 'should trigger "synced" event on model'
