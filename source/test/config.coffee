@@ -18,6 +18,7 @@ files = [
   'sinon-chai'
   'sinon'
   'backbone'
+  'mnemosyne'
 ]
 
 
@@ -40,7 +41,7 @@ get_requires = (path, node, is_base = false) -> ->
   name = if is_base then "" else capitalize node.name
   describe name, ->
     for file in node.files
-      require(new_path + file)()
+      require(new_path + file)
     for directory in node.directories
       get_requires(new_path, directory)()
 

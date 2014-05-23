@@ -1,4 +1,4 @@
-describe 'Request Manager specifications', ->
+module.exports = describe 'Request Manager specifications', ->
 
   server = null
   requestManager =  null
@@ -16,7 +16,7 @@ describe 'Request Manager specifications', ->
 
 
   beforeEach ->
-    RequestManager = require '../app/request_manager'
+    RequestManager = require '../../app/request_manager'
     Backbone       = require 'backbone'
     requestManager = new RequestManager()
     requestManager.clear()

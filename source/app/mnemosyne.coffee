@@ -5,58 +5,87 @@ localforage    = require "localforage"
   TODO
   * set db infos
   * documentation
+  * manage default options
 ###
 
 
 ###
   ------- Private methods -------
 ###
-store = localforage
+store = {}
+store.getItem = (key) ->
+  value = localStorage.getItem(key)
+  if value?
+    return $.Deferred().resolve(JSON.parse(value))
+  return $.Deferred().reject()
+
+
+store.setItem = (key, value) ->
+  localStorage.setItem(key, JSON.stringify(value))
+  return $.Deferred().resolve()
+
+store.clear = ->
+  localStorage.clear()
+  return $.Deferred().resolve()
+
 
 defaultOptions =
   forceRefresh: no
   invalidCache: no
-  ttl  : 600 * 1000 #10min
+
+defaultConstants =
+  ttl : 600 * 1000 # 10min
+  cache : true
+  allowExpiredCache :true
+
+
 
 
 read = (ctx, model, options, deferred) ->
-  load(ctx, key)
+  console.log "Try loading value from cache"
+  load(ctx, model.getKey())
   .done (item) ->
+    console.log "Succeed to read from cache"
     cacheRead(ctx, model, options, item, deferred)
   .fail ->
+    console.log "Fail to read from cache"
     serverRead(ctx, model, options, null, deferred)
 
 
 cacheRead = (ctx, model, options, item, deferred) ->
   # -- Cache expired
-  if options.forceRefresh or item.expirationDate < (new Date).getTime()
+
+  if options.forceRefresh or item.expirationDate < new Date().getTime()
+    console.log "-- cache expired"
     serverRead(ctx, model, options, item, deferred)
 
   # -- Cache valid
   else
+    console.log "-- cache valid"
     options.success?(item.value, 'success', null)
-    model.trigger(ctx.eventMap['synced'])
     deferred?.resolve(item.value)
-
-    # -- silent server update
-    if model.constants.silent
-      options.silent = true
-      serverRead(ctx, model, options, item, null)
+    model.trigger(ctx.eventMap['synced'])
 
 
 serverRead = (ctx, model, options, fallbackItem, deferred) ->
-  Backbone.sync(method, model, options)
-  .done ->
-    cacheWrite(ctx, model)
-    model.trigger(ctx.eventMap['synced'])
-    deferred.resolve.apply(this, arguments)
-  .fail =>
-    if value? and model.constants.allowExpiredCache
-      model.trigger(ctx.eventMap['cacheSynced'])
-    else
-    model.trigger(ctx.eventMap['unsynced'])
-    deferred.reject.apply(this, arguments)
+  console.log "Sync from server"
 
+  Backbone.sync('read', model, options)
+  .done ->
+    console.log "Succeed sync from server"
+    cacheWrite(ctx, model)
+    .always ->
+      model.trigger(ctx.eventMap['synced'])
+      deferred.resolve.apply(this, arguments)
+  .fail (error) ->
+    console.log "Fail sync from server"
+    if fallbackItem? and model.constants.allowExpiredCache
+      options.success?(fallbackItem.value, 'success', null)
+      deferred?.resolve(fallbackItem.value)
+      model.trigger(ctx.eventMap['synced'])
+    else
+      deferred.reject.apply(this, arguments)
+      model.trigger(ctx.eventMap['unsynced'])
 
 
 load = (ctx, key) ->
@@ -80,16 +109,18 @@ cacheWrite = (ctx, model) ->
   deferred = $.Deferred()
 
   if not model.getKey?()? or not model.constants.cache
-    deferred.reject()
+    return deferred.reject()
 
-  ttl         = model.constants.ttl or @_DEFAULT_EXPIRATION_TIME
-  expiredDate = (new Date()).getTime() + ttl * 1000
-
-  store.setItem(key, {'value' : value, 'expirationDate': expiredDate})
+  expiredDate = (new Date()).getTime() + model.constants.ttl
+  console.log "Try to write cache"
+  # store.setItem(model.getKey(), {'value' : model, 'expirationDate': expiredDate})
+  store.setItem(model.getKey(), {value : model, expirationDate: expiredDate})
   .then(
     ->
+      console.log "Succeed cache write"
       deferred.resolve.apply(this, arguments)
     ->
+      console.log "fail cache write"
       deferred.reject.apply(this, arguments)
   )
 
@@ -99,9 +130,9 @@ cacheWrite = (ctx, model) ->
 serverWrite = (ctx, method, model, options, deferred ) ->
   ctx.safeSync(method, model, options)
   .done ->
-    deferred.resolve.apply this, args
+    deferred.resolve.apply this, arguments
   .fail ->
-    deferred.reject.apply this, args
+    deferred.reject.apply this, arguments
 
 
 ###
@@ -139,13 +170,13 @@ invalidCache: (key, deferred) ->
 ###
   Wrap promise using jQuery Deferred
 ###
-wrapPromise: (promise) ->
+wrapPromise = (ctx, promise) ->
   deferred = $.Deferred()
   promise.then(
     ->
-      deferred.resolve.apply(this, arguments)
+      deferred.resolve()
     ->
-      deferred.reject.apply(this, arguments)
+      deferred.reject()
     )
   return deferred
 
@@ -155,15 +186,34 @@ wrapPromise: (promise) ->
   ------- Public methods -------
 ###
 
+
 module.exports = class Mnemosyne extends RequestManager
+
+  _context = null
+  constructor: ->
+    super
+    _context = @
+
+  cacheWrite : (model) ->
+    model.constants = _.defaults(model.constants or {}, defaultConstants)
+    cacheWrite(_context, model)
+
+  cacheRead  : (key) ->
+    deferred = $.Deferred()
+    store.getItem(key)
+    .done (item) ->
+      deferred.resolve(item.value)
+    .fail -> deferred.reject()
+    
+    return deferred
+
 
   ###
     Clear the cache. Cancel all pending requests.
   ###
   clear: ->
     super
-    return _wrapPromise @_store.clear.apply(this, arguments)
-
+    return store.clear()
 
   ###
     Overrides the Backbone.sync method
@@ -177,14 +227,15 @@ module.exports = class Mnemosyne extends RequestManager
   ###
   sync: (method, model, options = {}) ->
     # #console.log "[.] sync #{method}, #{model?}, #{model.constants.cache}"
-    options = _.extend(defaultOptions, options)
+    options = _.defaults(options, defaultOptions)
+    model.constants = _.defaults(model.constants or {}, defaultConstants)
     deferred = $.Deferred()
 
-    model.trigger(@eventMap['syncing'])
+    model.trigger(_context.eventMap['syncing'])
     switch method
       when 'read'
-        read(@, model, options, deferred)
+        read(_context, model, options, deferred)
       else
-        serverWrite(@, method, model, options, deferred)
+        serverWrite(_context, method, model, options, deferred)
 
     return deferred

@@ -1,10 +1,9 @@
-
-describe 'Magic Queue specifications', ->
+module.exports = describe 'Magic Queue specifications', ->
 
   magicQueue = null
 
   beforeEach ->
-    MagicQueue = require('../app/magic_queue')
+    MagicQueue = require('../../app/magic_queue')
     magicQueue = new MagicQueue()
     magicQueue.clear()
 

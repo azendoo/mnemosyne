@@ -14,7 +14,6 @@ Backbone    = require "backbone"
   * manage concurrent call to consume
 ###
 
-store = localforage
 defaultEventMap =
   'syncing'     : 'syncing'
   'pending'     : 'pending'
@@ -36,7 +35,6 @@ resetTimer = (ctx) ->
 
 cancelRequest = (ctx, request) ->
   request.model.trigger(ctx.eventMap['unsynced'])
-  store.removeItem(request.key)
 
 
 pushRequest = (ctx, request) ->
