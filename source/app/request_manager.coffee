@@ -55,7 +55,7 @@ consume = (ctx) ->
   .done ->
     request.model.trigger(ctx.eventMap['synced'])
     ctx.interval = MIN_INTERVAL
-  .fail ->
+  .fail (error) ->
     ctx.pendingRequests.addTail(request.key, request)
     request.model.trigger(ctx.eventMap['pending'])
     if ctx.interval < MAX_INTERVAL

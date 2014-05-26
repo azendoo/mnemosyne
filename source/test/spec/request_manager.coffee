@@ -6,37 +6,42 @@ module.exports = describe 'Request Manager specifications', ->
   model2 = null
   model3 = null
 
-  setUpServerResponse = ->
-    server.respondWith (xhr) ->
-      xhr.respond(
-        200
-        "Content-Type": "application/json"
-        '[{"id": 1, "name":"item1"},{"id": 2, "name":"item2"}]'
-      )
+  RequestManager = require '../../app/request_manager'
+  Backbone       = require 'backbone'
 
+
+  setUpServerResponse = ->
+      server.respondWith (xhr) ->
+        xhr.respond(
+          200
+          "Content-Type": "application/json"
+          '{"id": 1, "time":'+new Date().getTime()+'}'
+        )
 
   beforeEach ->
-    RequestManager = require '../../app/request_manager'
-    Backbone       = require 'backbone'
     requestManager = new RequestManager()
     requestManager.clear()
 
-    model1 = new Backbone.Model()
-    model1.getKey = -> 'model.1'
-    model1.url = -> '/route_test'
+    class CustomModel extends Backbone.Model
+      constructor: ->
+        super
+        @setTime(new Date().getTime())
 
-    model2 = new Backbone.Model()
-    model2.getKey = -> 'model.2'
-    model2.url = -> '/route_test'
-
-    model3 = new Backbone.Model()
-    model3.getKey = -> 'model.3'
-    model3.url = -> '/route_test'
-
+      getKey: -> 'modelKey_request'+ @get('id')
+      getTime: -> @get('time')
+      setTime: (value) -> @set('time', value)
+      url: -> '/test_route'
     server = sinon.fakeServer.create()
+    model1 = new CustomModel(id:1)
+    model2 = new CustomModel(id:2)
+    model3 = new CustomModel(id:3)
+
+    # Clear the localStorage may break sinon.server
+    # mnemosyne.clear().done -> done()
 
   afterEach ->
     server.restore()
+
 
   serverAutoRespondError = ->
     server.autoRespond = true
@@ -78,8 +83,8 @@ module.exports = describe 'Request Manager specifications', ->
         done()
 
     it 'should trigger "synced" event on model if the request succeed on the first try', (done) ->
-      model1.on "synced", -> done()
       serverAutoRespondOk()
+      model1.on "synced", -> done()
       requestManager.safeSync('update', model1)
 
     it 'should trigger "pending" event on model if the request fail and is pushed in queue', (done) ->
@@ -87,18 +92,7 @@ module.exports = describe 'Request Manager specifications', ->
       serverAutoRespondError()
       requestManager.safeSync('update', model1)
 
-    it 'should trigger "synced" after a "pending" event on model when the request succeed', (done) ->
-      pendingTriggered = false
-      model1.on "pending", ->
-        pendingTriggered = true
-        serverAutoRespondOk()
-
-      model1.on "synced", ->
-        expect(pendingTriggered).to.be.true
-        done()
-
-      serverAutoRespondError()
-      requestManager.safeSync('update', model1)
+    it 'should trigger "synced" after a "pending" event on model when the request succeed'
 
 
   describe 'Spec getPendingRequests', ->

@@ -2,6 +2,7 @@ module.exports = describe 'Mnemosyne specifications', ->
 
   server = null
   model = null
+  model2 = null
   CustomModel = null
   Backbone  = require 'backbone'
   Mnemosyne = require 'mnemosyne'
@@ -15,7 +16,7 @@ module.exports = describe 'Mnemosyne specifications', ->
       xhr.respond(
         200
         "Content-Type": "application/json"
-        "{id: 1, time:#{new Date().getTime()}}"
+        '{"id": 1, "time":'+new Date().getTime()+'}'
       )
 
 
@@ -36,6 +37,7 @@ module.exports = describe 'Mnemosyne specifications', ->
     serverSpy = sinon.spy()
     server = sinon.fakeServer.create()
     model = new CustomModel(id:1)
+    model2 = new CustomModel(id:2)
 
     # Clear the localStorage may break sinon.server
     # mnemosyne.clear().done -> done()
@@ -89,6 +91,7 @@ module.exports = describe 'Mnemosyne specifications', ->
       describe 'Cache expired', ->
         beforeEach (done) ->
           model.constants = {cache : true, ttl: 0}
+          model.setTime(0)
           mnemosyne.cacheWrite(model)
           .done -> done()
 
@@ -96,26 +99,22 @@ module.exports = describe 'Mnemosyne specifications', ->
           model.on "synced", -> done()
           model.fetch()
 
-        it 'should get data from cache', (done) ->
-          oldValue = model.getTime()
-          model.setTime(0)
+        it 'should get data from server', (done) ->
+          model.setTime(17)
           model.fetch()
           .done ->
-            expect(model.getTime()).to.equal(oldValue)
+            expect(model.getTime()).to.be.above(17)
             done()
 
         it 'should get data from cache, and after, update it with server data'
 
         it 'should write back server data in cache', (done) ->
-          model.setTime(17)
-          mnemosyne.cacheWrite(model)
+          model.fetch()
           .done ->
-            model.fetch()
-            .done() ->
-              mnemosyne.cacheRead(model.getKey())
-              .done (value) ->
-                expect(value).to.not.equal(17)
-
+            mnemosyne.cacheRead(model.getKey())
+            .done (value) ->
+              expect(value).to.not.equal(0)
+            .always -> done()
 
 
         describe '"allowExpiredCache" set to false', ->
@@ -139,7 +138,7 @@ module.exports = describe 'Mnemosyne specifications', ->
             mnemosyne.cacheWrite(model)
             .done ->
               model.fetch()
-              .done() ->
+              .done ->
                 mnemosyne.cacheRead(model.getKey())
                 .done (value) ->
                   expect(value).to.not.equal(17)
@@ -147,21 +146,22 @@ module.exports = describe 'Mnemosyne specifications', ->
 
 
       describe 'No cache', ->
+        # Should never equal 0
         beforeEach (done) ->
-          model.constants = {cache : false}
-          model.setTime(17)
+          model.setTime(0)
           mnemosyne.cacheWrite(model)
-          .done -> done()
+          .done ->
+            model.constants = {cache : false}
+            done()
 
         it 'should trigger "synced" event on model', (done) ->
           model.on "synced", -> done()
           model.fetch()
 
         it 'should get data from server', (done) ->
-          cacheValue = model.getTime()
           model.fetch()
           .done ->
-            expect(model.getTime()).to.be.above(cacheValue)
+            expect(model.getTime()).to.be.above(0)
             done()
 
 
@@ -187,7 +187,7 @@ module.exports = describe 'Mnemosyne specifications', ->
           mnemosyne.cacheWrite(model)
           .done ->
             model.fetch()
-            .done() ->
+            .done ->
               mnemosyne.cacheRead(model.getKey())
               .done (value) ->
                 expect(value).to.not.equal(17)
@@ -195,11 +195,13 @@ module.exports = describe 'Mnemosyne specifications', ->
 
 
       describe 'No cache', ->
+        # Should never be 0
         beforeEach (done) ->
-          model.constants = {cache : false}
-          model.setTime(17)
+          model.setTime(0)
           mnemosyne.cacheWrite(model)
-          .done -> done()
+          .done ->
+            model.constants = {cache : false}
+            done()
 
 
         it 'should trigger "synced" event on model', (done) ->
@@ -213,16 +215,14 @@ module.exports = describe 'Mnemosyne specifications', ->
             done()
 
 
-        it 'should not write data in cache', (done) ->
+        it 'should write data in cache', (done) ->
           model.setTime(17)
-          mnemosyne.cacheWrite(model)
+          model.save()
           .done ->
-            model.fetch()
-            .done() ->
-              mnemosyne.cacheRead(model.getKey())
-              .done (value) ->
-                expect(value).to.equal(17)
-                done()
+            mnemosyne.cacheRead(model.getKey())
+            .done (value) ->
+              expect(value.time).to.equal(17)
+              done()
 
 
   describe 'Offline', ->
@@ -320,8 +320,10 @@ module.exports = describe 'Mnemosyne specifications', ->
             mnemosyne.cacheRead(model.getKey())
             .done (value) ->
               expect(value.time).to.equal(13)
+              done()
 
         it 'should push the request in the queue', (done) ->
+          model2.save()
           model.save()
           .done ->
             expect(mnemosyne.getPendingRequests()).not.be.empty
@@ -347,6 +349,7 @@ module.exports = describe 'Mnemosyne specifications', ->
             mnemosyne.cacheRead(model.getKey())
             .done (value) ->
               expect(value.time).to.equal(13)
+              done()
 
 
       describe 'On connection recovered', ->

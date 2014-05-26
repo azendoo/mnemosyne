@@ -39,8 +39,6 @@ defaultConstants =
   allowExpiredCache :true
 
 
-
-
 read = (ctx, model, options, deferred) ->
 
   if not model.getKey?()? or not model.constants.cache
@@ -113,7 +111,7 @@ load = (ctx, key) ->
 cacheWrite = (ctx, model) ->
   deferred = $.Deferred()
 
-  if not model.getKey?()? or not model.constants.cache
+  if not model.getKey?()? #or not model.constants.cache
     return deferred.reject()
 
   expiredDate = (new Date()).getTime() + model.constants.ttl
@@ -133,11 +131,18 @@ cacheWrite = (ctx, model) ->
 
 
 serverWrite = (ctx, method, model, options, deferred ) ->
-  ctx.safeSync(method, model, options)
+  console.log "serverWrite"
+  cacheWrite(ctx, model)
   .done ->
-    deferred.resolve.apply this, arguments
+    ctx.safeSync(method, model, options)
+    .done ->
+      deferred.resolve.apply this, arguments
+    .fail ->
+      deferred.reject.apply this, arguments
   .fail ->
+    console.log "fail"
     deferred.reject.apply this, arguments
+    model.trigger(ctx.eventMap['unsynced'])
 
 
 ###
