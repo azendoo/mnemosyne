@@ -1,11 +1,13 @@
 RequestManager = require "../app/request_manager"
-localforage    = require "localforage"
+
+
 
 ###
   TODO
   * set db infos
   * documentation
   * manage default options
+  * manage key conflicts
 ###
 
 
@@ -76,7 +78,7 @@ serverRead = (ctx, model, options, fallbackItem, deferred) ->
   Backbone.sync('read', model, options)
   .done ->
     console.log "Succeed sync from server"
-    cacheWrite(ctx, model)
+    cacheWrite(ctx, model.getKey(), arguments[0], model.constants.ttl)
     .always ->
       model.trigger(ctx.eventMap['synced'])
       deferred.resolve.apply(this, arguments)
@@ -108,16 +110,15 @@ load = (ctx, key) ->
   return deferred
 
 
-cacheWrite = (ctx, model) ->
+cacheWrite = (ctx, key, value, ttl) ->
   deferred = $.Deferred()
 
-  if not model.getKey?()? #or not model.constants.cache
-    return deferred.reject()
+  ttl ?= 600000 # 10 min
 
-  expiredDate = (new Date()).getTime() + model.constants.ttl
+  expiredDate = (new Date()).getTime() + ttl
   console.log "Try to write cache"
   # store.setItem(model.getKey(), {'value' : model, 'expirationDate': expiredDate})
-  store.setItem(model.getKey(), {value : model, expirationDate: expiredDate})
+  store.setItem(key, {"value" : value, "expirationDate": expiredDate})
   .then(
     ->
       console.log "Succeed cache write"
@@ -132,7 +133,7 @@ cacheWrite = (ctx, model) ->
 
 serverWrite = (ctx, method, model, options, deferred ) ->
   console.log "serverWrite"
-  cacheWrite(ctx, model)
+  cacheWrite(ctx, model.getKey(), model.attributes, model.constants.ttl)
   .done ->
     ctx.safeSync(method, model, options)
     .done ->
@@ -206,7 +207,7 @@ module.exports = class Mnemosyne extends RequestManager
 
   cacheWrite : (model) ->
     model.constants = _.defaults(model.constants or {}, defaultConstants)
-    cacheWrite(_context, model)
+    cacheWrite(_context, model.getKey(), model.attributes, model.constants.ttl)
 
   cacheRead  : (key) ->
     deferred = $.Deferred()
@@ -240,6 +241,8 @@ module.exports = class Mnemosyne extends RequestManager
     options = _.defaults(options, defaultOptions)
     model.constants = _.defaults(model.constants or {}, defaultConstants)
     deferred = $.Deferred()
+
+    console.log model.getKey()
 
     model.trigger(_context.eventMap['syncing'])
     switch method

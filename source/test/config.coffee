@@ -4,7 +4,6 @@ require.config
     'sinon-chai'   : '../components/sinon-chai/lib/sinon-chai'
     'sinon'        : '../node_modules/sinon/pkg/sinon-1.10.0'
     'jquery'       : '../components/jquery/dist/jquery'
-    'localforage'  : '../components/localforage/dist/localforage'
     'underscore'   : '../components/underscore/underscore'
     'backbone'     : '../components/backbone/backbone'
     'mnemosyne'    : '../app/mnemosyne'

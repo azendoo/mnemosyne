@@ -57,7 +57,6 @@ module.exports = describe 'Request Manager specifications', ->
       serverAutoRespondError()
       requestManager.safeSync('write', model1)
       .always ->
-        expect(requestManager.timeout).to.exist
         requestManager.clear()
         expect(requestManager.timeout).to.not.exist
         done()

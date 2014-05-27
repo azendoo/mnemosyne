@@ -1,6 +1,6 @@
 MagicQueue = require "../app/magic_queue"
-localforage = require "localforage"
-Backbone    = require "backbone"
+# localforage = require "localforage"
+
 
 ###
   TODO
@@ -53,19 +53,22 @@ consume = (ctx) ->
   return deferred.reject() if not request?
   Backbone.sync(request.method, request.model, request.options)
   .done ->
-    request.model.trigger(ctx.eventMap['synced'])
     ctx.interval = MIN_INTERVAL
+    deferred.resolve.apply(this, arguments)
+    request.model.trigger(ctx.eventMap['synced'])
   .fail (error) ->
     ctx.pendingRequests.addTail(request.key, request)
-    request.model.trigger(ctx.eventMap['pending'])
     if ctx.interval < MAX_INTERVAL
       ctx.interval = ctx.interval * 2
+    deferred.resolve(request.model.attributes)
+    request.model.trigger(ctx.eventMap['pending'])
   .always ->
     ctx.timeout  = setTimeout( (-> consume(ctx) ), ctx.interval)
-    deferred.resolve.apply(this, arguments)
 
   return deferred
 
+isConnected= ->
+  return window.navigator.onLine
 
 
 ###

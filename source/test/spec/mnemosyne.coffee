@@ -265,6 +265,7 @@ module.exports = describe 'Mnemosyne specifications', ->
           mnemosyne.cacheWrite(model)
           .done -> done()
 
+
         it 'should trigger "synced" event on model', (done) ->
           model.on 'synced', -> done()
           model.fetch()
@@ -312,7 +313,6 @@ module.exports = describe 'Mnemosyne specifications', ->
           model.on 'pending', -> done()
           model.save()
 
-        # TODO write data in cache
         it 'should write the data in cache', (done) ->
           model.setTime(13)
           model.save()

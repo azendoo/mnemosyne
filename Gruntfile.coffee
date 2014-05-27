@@ -147,9 +147,7 @@ module.exports = (grunt) ->
           out: "dist/mnemosyne.js"
           optimize: 'none'
           cjsTranslate: true
-          paths:
-            requireLib: '../components/almond/almond'
-          include: ['requireLib']
+          exclude: ['backbone']
 
     usebanner:
       dist:
