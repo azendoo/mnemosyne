@@ -1,5 +1,6 @@
 RequestManager = require "../app/request_manager"
-
+# Backbone = require "backbone"
+# _        = require "underscore"
 
 
 ###

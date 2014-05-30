@@ -132,3 +132,41 @@ module.exports = describe 'Magic Queue specifications', ->
       expect(queue).to.eql(expectedQueue)
 
       done()
+
+  describe 'Spec getHead', ->
+    it 'should return the head value', ->
+      populateMagicQueue()
+      expect(magicQueue.getHead()).to.be.equal(10)
+
+    it 'should keep the value at the head', ->
+      expectedQueue = [1..10]
+      populateMagicQueue()
+      magicQueue.getHead()
+      magicQueue.getHead()
+      magicQueue.getHead()
+      magicQueue.getHead()
+      expect(magicQueue.getHead()).to.be.equal(10)
+      expect(magicQueue.getQueue()).to.eql(expectedQueue)
+
+
+  describe 'Spec getTail', ->
+    it 'should return the tail value', ->
+      populateMagicQueue()
+      expect(magicQueue.getTail()).to.be.equal(1)
+
+    it 'should keep the value at the tail', ->
+      expectedQueue = [1..10]
+      populateMagicQueue()
+      magicQueue.getHead()
+      magicQueue.getTail()
+      expect(magicQueue.getTail()).to.be.equal(1)
+      expect(magicQueue.getQueue()).to.eql(expectedQueue)
+
+  describe 'Spec rotate', ->
+    it 'should pop the head and unshift it to the queue', ->
+      expectedQueue = [8,9,10,1,2,3,4,5,6,7]
+      populateMagicQueue()
+      magicQueue.rotate()
+      magicQueue.rotate()
+      magicQueue.rotate()
+      expect(magicQueue.getQueue()).to.eql(expectedQueue)

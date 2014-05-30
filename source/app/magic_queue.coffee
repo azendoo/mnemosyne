@@ -34,6 +34,20 @@ module.exports = class MagicQueue
     @dict[key] = value
 
 
+  getHead: ->
+    len = @orderedKeys.length
+    @dict[@orderedKeys[len-1]]
+
+
+  getTail: ->
+    @dict[@orderedKeys[0]]
+
+
+  rotate: ->
+    return if @orderedKeys.length < 1
+    @orderedKeys.unshift(@orderedKeys.pop())
+
+
   retrieveHead: ->
     return null if @orderedKeys.length is 0
     key = @orderedKeys.pop()

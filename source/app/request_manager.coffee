@@ -1,6 +1,7 @@
 MagicQueue = require "../app/magic_queue"
 # localforage = require "localforage"
-
+# Backbone = require "backbone"
+# _        = require "underscore"
 
 ###
   TODO
@@ -12,6 +13,12 @@ MagicQueue = require "../app/magic_queue"
   * request db persistence
   * set default values for MAX et MIN interval
   * manage concurrent call to consume
+
+  If there is a delete on a create, cancel the request. and valid the delete
+  If there is a delete on an update, only send the delete the delete
+
+  Manage status code errors to cancel the request
+
 ###
 
 defaultEventMap =
@@ -38,38 +45,77 @@ cancelRequest = (ctx, request) ->
 
 
 pushRequest = (ctx, request) ->
-  return if not request?
-
-  ctx.pendingRequests.addHead(request.key, request)
-  resetTimer(ctx)
-
-  return consume(ctx)
-
-
-consume = (ctx) ->
   deferred = $.Deferred()
-
-  request = ctx.pendingRequests.retrieveHead()
   return deferred.reject() if not request?
-  Backbone.sync(request.method, request.model, request.options)
+
+  method = getMethod(request);
+  options = request.methods[method]
+
+  ctx.pendingRequests.addTail(request.key, request)
+  Backbone.sync(method, request.model, options)
   .done ->
-    ctx.interval = MIN_INTERVAL
+    ctx.pendingRequests.retrieveItem(request.key)
     deferred.resolve.apply(this, arguments)
     request.model.trigger(ctx.eventMap['synced'])
   .fail (error) ->
-    ctx.pendingRequests.addTail(request.key, request)
+    deferred.resolve(request.model.attributes)
+    request.model.trigger(ctx.eventMap['pending'])
+    if (not ctx.timeout?)
+      consume(ctx)
+
+  return deferred
+
+
+consume = (ctx) ->
+
+  request = ctx.pendingRequests.getHead()
+  # console.log ctx.pendingRequests.orderedKeys
+  if (not request?)
+    resetTimer(ctx)
+    return
+
+  method = getMethod(request);
+  options = request.methods[method]
+
+  Backbone.sync(method, request.model, options)
+  .done ->
+    ctx.pendingRequests.retrieveHead()
+    ctx.interval = MIN_INTERVAL
+    request.model.trigger(ctx.eventMap['synced'])
+  .fail (error) ->
+    ctx.pendingRequests.rotate()
     if ctx.interval < MAX_INTERVAL
       ctx.interval = ctx.interval * 2
-    deferred.resolve(request.model.attributes)
     request.model.trigger(ctx.eventMap['pending'])
   .always ->
     ctx.timeout  = setTimeout( (-> consume(ctx) ), ctx.interval)
 
-  return deferred
 
+# TODO manage connection on mobile devices
 isConnected= ->
   return window.navigator.onLine
 
+# Optimize request avoiding to send some useless data
+smartRequest= (ctx, request) ->
+  # console.log "--smart--", request.methods
+  if request.methods['destroy']? and request.methods['create']?
+    ctx.pendingRequests.retrieveItem(request.key)
+    return null
+  if (request.methods['create']? or request.methods['destroy']?) and request.methods['update']?
+    delete request.methods['update']
+    return request
+
+  return request
+
+getMethod= (request) ->
+  if request.methods['create']
+    return 'create'
+
+  else if request.methods['update']
+    return 'udpate'
+
+  else if request.methods['destroy']
+    return 'destroy'
 
 ###
   ------- Public methods -------
@@ -114,10 +160,15 @@ module.exports = class RequestManager
 
 
   safeSync: (method, model, options = {}) ->
-    request = {}
-    request.method  = method
+    # Is there allready some pending request for this model?
+    request = @pendingRequests.getItem(model.getKey())
+    request ?= {}
+    request.methods  ?= {}
+
     request.model   = model
-    request.options = options
+    request.methods[method] = options
     request.key     = model.getKey()
+
+    request = smartRequest(@, request)
 
     return pushRequest(@, request)

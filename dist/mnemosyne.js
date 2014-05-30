@@ -170,33 +170,22 @@ consume = function(ctx) {
   if (request == null) {
     return deferred.reject();
   }
-  if (isConnected()) {
-    Backbone.sync(request.method, request.model, request.options).done(function(value) {
-      ctx.interval = MIN_INTERVAL;
-      console.log(value);
-      deferred.resolve(value);
-      return request.model.trigger(ctx.eventMap['synced']);
-    }).fail(function(error) {
-      ctx.pendingRequests.addTail(request.key, request);
-      request.model.trigger(ctx.eventMap['pending']);
-      if (ctx.interval < MAX_INTERVAL) {
-        ctx.interval = ctx.interval * 2;
-      }
-      return deferred.resolve(request.model.getAttributes());
-    }).always(function() {
-      return ctx.timeout = setTimeout((function() {
-        return consume(ctx);
-      }), ctx.interval);
-    });
-  } else {
-    console.log("-- no connection", request.model);
+  Backbone.sync(request.method, request.model, request.options).done(function() {
+    ctx.interval = MIN_INTERVAL;
+    deferred.resolve.apply(this, arguments);
+    return request.model.trigger(ctx.eventMap['synced']);
+  }).fail(function(error) {
     ctx.pendingRequests.addTail(request.key, request);
     if (ctx.interval < MAX_INTERVAL) {
       ctx.interval = ctx.interval * 2;
     }
-    deferred.resolve(request.model);
-    request.model.trigger(ctx.eventMap['synced']);
-  }
+    deferred.resolve(request.model.attributes);
+    return request.model.trigger(ctx.eventMap['pending']);
+  }).always(function() {
+    return ctx.timeout = setTimeout((function() {
+      return consume(ctx);
+    }), ctx.interval);
+  });
   return deferred;
 };
 
@@ -420,7 +409,7 @@ cacheWrite = function(ctx, key, value, ttl) {
 
 serverWrite = function(ctx, method, model, options, deferred) {
   console.log("serverWrite");
-  return cacheWrite(ctx, model).done(function() {
+  return cacheWrite(ctx, model.getKey(), model.attributes, model.constants.ttl).done(function() {
     return ctx.safeSync(method, model, options).done(function() {
       return deferred.resolve.apply(this, arguments);
     }).fail(function() {
@@ -510,7 +499,7 @@ module.exports = Mnemosyne = (function(_super) {
 
   Mnemosyne.prototype.cacheWrite = function(model) {
     model.constants = _.defaults(model.constants || {}, defaultConstants);
-    return cacheWrite(_context, model.getKey(), model.getAttributes(), model.constants.ttl);
+    return cacheWrite(_context, model.getKey(), model.attributes, model.constants.ttl);
   };
 
   Mnemosyne.prototype.cacheRead = function(key) {

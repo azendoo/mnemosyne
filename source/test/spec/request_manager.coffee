@@ -67,10 +67,12 @@ module.exports = describe 'Request Manager specifications', ->
       serverAutoRespondError()
       requestManager.safeSync('write', model1)
       .always ->
-        expect(requestManager.interval).to.be.above(400)
-        requestManager.clear()
-        expect(requestManager.interval).to.equal(250)
-        done()
+        setTimeout((->
+          expect(requestManager.interval).to.be.above(400)
+          requestManager.clear()
+          expect(requestManager.interval).to.equal(250)
+          done()),250)
+
 
 
   describe 'Spec safeSync', ->
@@ -147,10 +149,11 @@ module.exports = describe 'Request Manager specifications', ->
 
     it 'should trigger "unsynced" on model when the request is cancelled', (done) ->
       model1.on 'unsynced', -> done()
+      model1.on 'pending', -> requestManager.cancelPendingRequest(model1.getKey())
       serverAutoRespondError()
       requestManager.safeSync('update', model1)
-      .always ->
-        requestManager.cancelPendingRequest(model1.getKey())
+
+
 
 
   describe 'Spec retrySync', ->
@@ -160,7 +163,6 @@ module.exports = describe 'Request Manager specifications', ->
       serverAutoRespondError()
       requestManager.safeSync('update', model1)
       .done ->
-        expect(requestManager.interval).to.be.above(400)
         setTimeout(
           ->
             lastInterval = requestManager.interval
@@ -168,3 +170,29 @@ module.exports = describe 'Request Manager specifications', ->
             expect(requestManager.interval).to.be.below(lastInterval)
             done()
           1000 )
+
+  describe 'Spec smart request', ->
+    it 'should cancel the request if a destroy is pending after a create', (done) ->
+      serverAutoRespondError()
+      $.when(
+        requestManager.safeSync('create', model1),
+        requestManager.safeSync('update', model1),
+        requestManager.safeSync('destroy', model1)
+      ).always ->
+        nbPendingRequests = requestManager.getPendingRequests().length
+        expect(nbPendingRequests).to.be.equal(0)
+        done()
+
+    it 'should cancel the update request if a create request is pending', (done) ->
+      serverAutoRespondError()
+      $.when(
+        requestManager.safeSync('create', model1),
+        requestManager.safeSync('update', model1),
+      ).done ->
+        nbPendingRequests = requestManager.getPendingRequests().length
+        expect(nbPendingRequests).to.be.equal(1)
+        request = requestManager.getPendingRequests()[0]
+        expect(request.methods['update']).to.not.exist
+        done()
+
+    it 'should cancel the update request if a destroy request is pending'
