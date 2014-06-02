@@ -177,7 +177,7 @@ module.exports = describe 'Request Manager specifications', ->
       $.when(
         requestManager.safeSync('create', model1),
         requestManager.safeSync('update', model1),
-        requestManager.safeSync('destroy', model1)
+        requestManager.safeSync('delete', model1)
       ).always ->
         nbPendingRequests = requestManager.getPendingRequests().length
         expect(nbPendingRequests).to.be.equal(0)

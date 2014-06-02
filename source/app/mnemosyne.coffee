@@ -199,6 +199,8 @@ wrapPromise = (ctx, promise) ->
 ###
 
 
+
+
 module.exports = class Mnemosyne extends RequestManager
 
   _context = null
@@ -252,3 +254,14 @@ module.exports = class Mnemosyne extends RequestManager
         serverWrite(_context, method, model, options, deferred)
 
     return deferred
+
+
+
+mnemosyne = new Mnemosyne()
+Mnemosyne.Model = class Model extends Backbone.Model
+  sync: -> mnemosyne.sync.apply this, arguments
+  destroy: ->
+    if @isNew()
+      @cancelPendingRequest(@getKey())
+    else
+      super

@@ -215,13 +215,13 @@ module.exports = describe 'Mnemosyne specifications', ->
             done()
 
 
-        it 'should write data in cache', (done) ->
+        it 'should not write data in cache', (done) ->
           model.setTime(17)
           model.save()
           .done ->
             mnemosyne.cacheRead(model.getKey())
-            .done (value) ->
-              expect(value.time).to.equal(17)
+            .always (value) ->
+              expect(value).to.not.exists
               done()
 
 

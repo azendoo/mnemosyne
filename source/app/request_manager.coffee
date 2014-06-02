@@ -106,8 +106,8 @@ consume = (ctx) ->
   .fail (error) ->
     console.log '[consume] -- Sync failed', error
 
-    # ctx.pendingRequests.rotate()
-    ctx.pendingRequests.retrieveHead()
+    ctx.pendingRequests.rotate()
+    # ctx.pendingRequests.retrieveHead()
 
     if ctx.interval < MAX_INTERVAL
       ctx.interval = ctx.interval * 2
@@ -147,6 +147,9 @@ getMethod= (request) ->
 ###
   ------- Public methods -------
 ###
+
+
+
 
 module.exports = class RequestManager
 
