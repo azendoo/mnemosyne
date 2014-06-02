@@ -49,6 +49,23 @@ module.exports = MagicQueue = (function() {
     return this.dict[key] = value;
   };
 
+  MagicQueue.prototype.getHead = function() {
+    var len;
+    len = this.orderedKeys.length;
+    return this.dict[this.orderedKeys[len - 1]];
+  };
+
+  MagicQueue.prototype.getTail = function() {
+    return this.dict[this.orderedKeys[0]];
+  };
+
+  MagicQueue.prototype.rotate = function() {
+    if (this.orderedKeys.length < 1) {
+      return;
+    }
+    return this.orderedKeys.unshift(this.orderedKeys.pop());
+  };
+
   MagicQueue.prototype.retrieveHead = function() {
     var key, value;
     if (this.orderedKeys.length === 0) {
@@ -111,7 +128,7 @@ module.exports = MagicQueue = (function() {
 
 });
 
-define('../app/request_manager',['require','exports','module','../app/magic_queue'],function (require, exports, module) {var MAX_INTERVAL, MIN_INTERVAL, MagicQueue, RequestManager, cancelRequest, consume, defaultEventMap, isConnected, pushRequest, resetTimer;
+define('../app/request_manager',['require','exports','module','../app/magic_queue'],function (require, exports, module) {var MAX_INTERVAL, MIN_INTERVAL, MagicQueue, RequestManager, cancelRequest, consume, defaultEventMap, getMethod, isConnected, pushRequest, resetTimer, smartRequest;
 
 MagicQueue = require("../app/magic_queue");
 
@@ -125,7 +142,8 @@ MagicQueue = require("../app/magic_queue");
   * manage connectivity
   * request db persistence
   * set default values for MAX et MIN interval
-  * manage concurrent call to consume
+
+  Manage status code errors to cancel the request
  */
 
 defaultEventMap = {
@@ -155,42 +173,104 @@ cancelRequest = function(ctx, request) {
 };
 
 pushRequest = function(ctx, request) {
-  if (request == null) {
-    return;
-  }
-  ctx.pendingRequests.addHead(request.key, request);
-  resetTimer(ctx);
-  return consume(ctx);
-};
-
-consume = function(ctx) {
-  var deferred, request;
+  var deferred, method, options;
   deferred = $.Deferred();
-  request = ctx.pendingRequests.retrieveHead();
   if (request == null) {
     return deferred.reject();
   }
-  Backbone.sync(request.method, request.model, request.options).done(function() {
-    ctx.interval = MIN_INTERVAL;
+  ctx.pendingRequests.addTail(request.key, request);
+  method = getMethod(request);
+  options = request.methods[method];
+  if (!isConnected()) {
+    console.log('[pushRequest] -- not connected. Push request in queue');
+    request.model.trigger(ctx.eventMap['pending']);
+    if (ctx.timeout == null) {
+      consume(ctx);
+    }
+    return deferred.resolve(request.model.attributes);
+  }
+  console.log('[pushRequest] -- Try sync');
+  Backbone.sync(method, request.model, options).done(function() {
+    console.log('[pushRequest] -- Sync success');
+    localStorage.removeItem(request.key);
+    ctx.pendingRequests.retrieveItem(request.key);
     deferred.resolve.apply(this, arguments);
     return request.model.trigger(ctx.eventMap['synced']);
   }).fail(function(error) {
-    ctx.pendingRequests.addTail(request.key, request);
+    console.log('[pushRequest] -- Sync failed');
+    deferred.resolve(request.model.attributes);
+    request.model.trigger(ctx.eventMap['pending']);
+    if (ctx.timeout == null) {
+      return consume(ctx);
+    }
+  });
+  return deferred;
+};
+
+consume = function(ctx) {
+  var method, options, request;
+  request = ctx.pendingRequests.getHead();
+  if (request == null) {
+    console.log('[consume] -- done! 0 pending');
+    resetTimer(ctx);
+    return;
+  }
+  if (!isConnected()) {
     if (ctx.interval < MAX_INTERVAL) {
       ctx.interval = ctx.interval * 2;
     }
-    deferred.resolve(request.model.attributes);
-    return request.model.trigger(ctx.eventMap['pending']);
+    console.log('[consume] -- not connected, next try in ', ctx.interval);
+    return ctx.timeout = setTimeout((function() {
+      return consume(ctx);
+    }), ctx.interval);
+  }
+  method = getMethod(request);
+  options = request.methods[method];
+  console.log('[consume] -- try sync ', method);
+  return Backbone.sync(method, request.model, options).done(function() {
+    console.log('[consume] --Sync success');
+    ctx.pendingRequests.retrieveHead();
+    ctx.interval = MIN_INTERVAL;
+    return request.model.trigger(ctx.eventMap['synced']);
+  }).fail(function(error) {
+    console.log('[consume] -- Sync failed', error);
+    ctx.pendingRequests.retrieveHead();
+    if (ctx.interval < MAX_INTERVAL) {
+      return ctx.interval = ctx.interval * 2;
+    }
   }).always(function() {
     return ctx.timeout = setTimeout((function() {
       return consume(ctx);
     }), ctx.interval);
   });
-  return deferred;
 };
 
 isConnected = function() {
   return window.navigator.onLine;
+};
+
+smartRequest = function(ctx, request) {
+  if ((request.methods['destroy'] != null) && (request.methods['create'] != null)) {
+    ctx.pendingRequests.retrieveItem(request.key);
+    return null;
+  }
+  if (((request.methods['create'] != null) || (request.methods['destroy'] != null)) && (request.methods['update'] != null)) {
+    delete request.methods['update'];
+    return request;
+  }
+  return request;
+};
+
+getMethod = function(request) {
+  if (request.methods['create']) {
+    return 'create';
+  } else if (request.methods['update']) {
+    return 'udpate';
+  } else if (request.methods['delete']) {
+    return 'delete';
+  } else {
+    return console.error("No method found !", request);
+  }
 };
 
 
@@ -249,11 +329,17 @@ module.exports = RequestManager = (function() {
     if (options == null) {
       options = {};
     }
-    request = {};
-    request.method = method;
+    request = this.pendingRequests.getItem(model.getKey());
+    if (request == null) {
+      request = {};
+    }
+    if (request.methods == null) {
+      request.methods = {};
+    }
     request.model = model;
-    request.options = options;
+    request.methods[method] = options;
     request.key = model.getKey();
+    request = smartRequest(this, request);
     return pushRequest(this, request);
   };
 
@@ -515,12 +601,11 @@ module.exports = Mnemosyne = (function(_super) {
 
 
   /*
-    Clear the cache. Cancel all pending requests.
+    Cancel all pending requests.
    */
 
   Mnemosyne.prototype.clear = function() {
-    Mnemosyne.__super__.clear.apply(this, arguments);
-    return store.clear();
+    return Mnemosyne.__super__.clear.apply(this, arguments);
   };
 
 

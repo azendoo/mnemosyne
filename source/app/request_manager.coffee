@@ -12,10 +12,6 @@ MagicQueue = require "../app/magic_queue"
   * manage connectivity
   * request db persistence
   * set default values for MAX et MIN interval
-  * manage concurrent call to consume
-
-  If there is a delete on a create, cancel the request. and valid the delete
-  If there is a delete on an update, only send the delete the delete
 
   Manage status code errors to cancel the request
 
@@ -47,17 +43,32 @@ cancelRequest = (ctx, request) ->
 pushRequest = (ctx, request) ->
   deferred = $.Deferred()
   return deferred.reject() if not request?
+  ctx.pendingRequests.addTail(request.key, request)
 
   method = getMethod(request);
   options = request.methods[method]
 
-  ctx.pendingRequests.addTail(request.key, request)
+  if (not isConnected())
+    console.log '[pushRequest] -- not connected. Push request in queue'
+    request.model.trigger(ctx.eventMap['pending'])
+    if (not ctx.timeout?)
+      consume(ctx)
+    return deferred.resolve(request.model.attributes)
+
+  console.log '[pushRequest] -- Try sync'
+
   Backbone.sync(method, request.model, options)
   .done ->
+    console.log '[pushRequest] -- Sync success'
+    # TODO use localforage
+
+    localStorage.removeItem(request.key)
     ctx.pendingRequests.retrieveItem(request.key)
     deferred.resolve.apply(this, arguments)
     request.model.trigger(ctx.eventMap['synced'])
   .fail (error) ->
+    console.log '[pushRequest] -- Sync failed'
+
     deferred.resolve(request.model.attributes)
     request.model.trigger(ctx.eventMap['pending'])
     if (not ctx.timeout?)
@@ -69,24 +80,37 @@ pushRequest = (ctx, request) ->
 consume = (ctx) ->
 
   request = ctx.pendingRequests.getHead()
-  # console.log ctx.pendingRequests.orderedKeys
   if (not request?)
+    console.log '[consume] -- done! 0 pending'
     resetTimer(ctx)
     return
 
-  method = getMethod(request);
+  if (not isConnected())
+    if ctx.interval < MAX_INTERVAL
+      ctx.interval = ctx.interval * 2
+    console.log '[consume] -- not connected, next try in ', ctx.interval
+    return ctx.timeout  = setTimeout( (-> consume(ctx) ), ctx.interval)
+
+  method  = getMethod(request);
   options = request.methods[method]
+
+  console.log '[consume] -- try sync ', method
 
   Backbone.sync(method, request.model, options)
   .done ->
+    console.log '[consume] --Sync success'
+
     ctx.pendingRequests.retrieveHead()
     ctx.interval = MIN_INTERVAL
     request.model.trigger(ctx.eventMap['synced'])
   .fail (error) ->
-    ctx.pendingRequests.rotate()
+    console.log '[consume] -- Sync failed', error
+
+    # ctx.pendingRequests.rotate()
+    ctx.pendingRequests.retrieveHead()
+
     if ctx.interval < MAX_INTERVAL
       ctx.interval = ctx.interval * 2
-    request.model.trigger(ctx.eventMap['pending'])
   .always ->
     ctx.timeout  = setTimeout( (-> consume(ctx) ), ctx.interval)
 
@@ -98,10 +122,10 @@ isConnected= ->
 # Optimize request avoiding to send some useless data
 smartRequest= (ctx, request) ->
   # console.log "--smart--", request.methods
-  if request.methods['destroy']? and request.methods['create']?
+  if request.methods['delete']? and request.methods['create']?
     ctx.pendingRequests.retrieveItem(request.key)
     return null
-  if (request.methods['create']? or request.methods['destroy']?) and request.methods['update']?
+  if (request.methods['create']? or request.methods['delete']?) and request.methods['update']?
     delete request.methods['update']
     return request
 
@@ -114,8 +138,11 @@ getMethod= (request) ->
   else if request.methods['update']
     return 'udpate'
 
-  else if request.methods['destroy']
-    return 'destroy'
+  else if request.methods['delete']
+    return 'delete'
+
+  else
+    console.error "No method found !", request
 
 ###
   ------- Public methods -------

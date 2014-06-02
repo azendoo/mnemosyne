@@ -221,11 +221,10 @@ module.exports = class Mnemosyne extends RequestManager
 
 
   ###
-    Clear the cache. Cancel all pending requests.
+    Cancel all pending requests.
   ###
   clear: ->
     super
-    return store.clear()
 
   ###
     Overrides the Backbone.sync method
