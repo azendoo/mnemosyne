@@ -29,6 +29,7 @@ store.clear = ->
   localStorage.clear()
   return $.Deferred().resolve()
 
+
 read = (ctx, model, options, deferred) ->
 
   if not model.getKey?()? or not model.cache.enabled
@@ -63,20 +64,24 @@ cacheRead = (ctx, model, options, item, deferred) ->
 serverRead = (ctx, model, options, fallbackItem, deferred) ->
   console.log "Sync from server"
 
+  # Return cache data and update silently the cache
+  if fallbackItem? and model.cache.allowExpiredCache and not options.forceRefresh
+    options.success?(fallbackItem.value, 'success', null)
+    deferred.resolve(fallbackItem.value)
+    model.trigger(ctx.eventMap['synced'])
+    options.silent = true
+
   Backbone.sync('read', model, options)
   .done ->
     console.log "Succeed sync from server"
     cacheWrite(ctx, model.getKey(), arguments[0], model.cache.ttl)
     .always ->
-      model.trigger(ctx.eventMap['synced'])
-      deferred.resolve.apply(this, arguments)
+      if deferred.state() isnt "resolved"
+        model.trigger(ctx.eventMap['synced'])
+        deferred.resolve.apply(this, arguments)
   .fail (error) ->
     console.log "Fail sync from server"
-    if fallbackItem? and model.cache.allowExpiredCache
-      options.success?(fallbackItem.value, 'success', null)
-      deferred?.resolve(fallbackItem.value)
-      model.trigger(ctx.eventMap['synced'])
-    else
+    if deferred.state() isnt "resolved"
       deferred.reject.apply(this, arguments)
       model.trigger(ctx.eventMap['unsynced'])
 
@@ -101,10 +106,8 @@ load = (ctx, key) ->
 cacheWrite = (ctx, key, value, ttl) ->
   deferred = $.Deferred()
 
-  ttl ?= 600000 # 10 min
-
   expiredDate = (new Date()).getTime() + ttl
-  console.log "Try to write cache"
+  console.log "Try to write cache -- expires at #{expiredDate}"
   # store.setItem(model.getKey(), {'value' : model, 'expirationDate': expiredDate})
   store.setItem(key, {"value" : value, "expirationDate": expiredDate})
   .then(
@@ -132,38 +135,6 @@ serverWrite = (ctx, method, model, options, deferred ) ->
     console.log "fail"
     deferred.reject.apply this, arguments
     model.trigger(ctx.eventMap['unsynced'])
-
-
-###
-  Set the expiration date to 0
-  TODO put this method public ?
-###
-invalidCache: (key, deferred) ->
-  deferred ?= $.Deferred()
-  if not key?
-    return deferred.reject()
-
-  set_item_failure = ->
-    deferred.reject()
-
-  set_item_success = ->
-    if model.collection?
-      invalidCache(model.collection.getKey?(), deferred)
-    else
-      deferred.resolve()
-
-  store.getItem(key).then(
-    (item) =>
-      if not item?
-        return deferred.resolve()
-      store.setItem(key, {value: item.value, expiration_date: 0})
-      .then(set_item_success, set_item_failure)
-    ->
-      # Object not saved in cache
-      deferred.resolve()
-    )
-
-  return deferred
 
 
 ###
@@ -214,6 +185,9 @@ module.exports = class Mnemosyne extends RequestManager
 
     return deferred
 
+  cacheRemove: (key) ->
+    return store.removeItem(key)
+
   ###
     Overrides the Backbone.sync method
   ###
@@ -223,7 +197,7 @@ module.exports = class Mnemosyne extends RequestManager
     model.cache = _.defaults(model.cache or {}, defaultCacheOptions)
     deferred = $.Deferred()
 
-    console.log model.getKey()
+    console.log "\n" + model.getKey()
 
     model.trigger(_context.eventMap['syncing'])
     switch method
