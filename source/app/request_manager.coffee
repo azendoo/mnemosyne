@@ -9,12 +9,8 @@ MagicQueue = require "../app/magic_queue"
   * manage the database limit
   * documentation
   * set models status according to events, and update the cache
-  * manage connectivity
   * request db persistence
-  * set default values for MAX et MIN interval
-
-  Manage status code errors to cancel the request
-
+  * Discuss about the status 4XX and 5XX
 ###
 
 defaultEventMap =
@@ -106,8 +102,10 @@ consume = (ctx) ->
   .fail (error) ->
     console.log '[consume] -- Sync failed', error
 
-    ctx.pendingRequests.rotate()
-    # ctx.pendingRequests.retrieveHead()
+    status = error.readyState
+    switch status
+      when 4, 5 then ctx.pendingRequests.retrieveHead()
+      else ctx.pendingRequests.rotate()
 
     if ctx.interval < MAX_INTERVAL
       ctx.interval = ctx.interval * 2
@@ -120,6 +118,8 @@ isConnected= ->
   return window.navigator.onLine
 
 # Optimize request avoiding to send some useless data
+# TODO add 'patch':  'PATCH',
+
 smartRequest= (ctx, request) ->
   # console.log "--smart--", request.methods
   if request.methods['delete']? and request.methods['create']?

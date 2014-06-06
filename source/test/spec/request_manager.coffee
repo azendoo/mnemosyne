@@ -10,10 +10,10 @@ module.exports = describe 'Request Manager specifications', ->
   Backbone       = require 'backbone'
 
 
-  setUpServerResponse = ->
+  setUpServerResponse = (statusCode=200) ->
       server.respondWith (xhr) ->
         xhr.respond(
-          200
+          statusCode
           "Content-Type": "application/json"
           '{"id": 1, "time":'+new Date().getTime()+'}'
         )
@@ -55,7 +55,7 @@ module.exports = describe 'Request Manager specifications', ->
       expect(requestManager.timeout).to.not.exist
 
       serverAutoRespondError()
-      requestManager.safeSync('write', model1)
+      requestManager.safeSync('create', model1)
       .always ->
         requestManager.clear()
         expect(requestManager.timeout).to.not.exist
@@ -65,7 +65,7 @@ module.exports = describe 'Request Manager specifications', ->
       expect(requestManager.interval).to.equal(250)
 
       serverAutoRespondError()
-      requestManager.safeSync('write', model1)
+      requestManager.safeSync('create', model1)
       .always ->
         setTimeout((->
           expect(requestManager.interval).to.be.above(400)
@@ -78,7 +78,7 @@ module.exports = describe 'Request Manager specifications', ->
   describe 'Spec safeSync', ->
     it 'should resolve the promise if the request succeed on the first try', (done) ->
       serverAutoRespondOk()
-      deferred = requestManager.safeSync('write', model1)
+      deferred = requestManager.safeSync('create', model1)
       deferred.always ->
         expect(deferred.state()).to.be.equal("resolved")
         done()
@@ -157,19 +157,7 @@ module.exports = describe 'Request Manager specifications', ->
 
 
   describe 'Spec retrySync', ->
-    it 'should reset the interval value to the min value', (done) ->
-      expect(requestManager.interval).to.be.equal(250)
-
-      serverAutoRespondError()
-      requestManager.safeSync('update', model1)
-      .done ->
-        setTimeout(
-          ->
-            lastInterval = requestManager.interval
-            requestManager.retrySync()
-            expect(requestManager.interval).to.be.below(lastInterval)
-            done()
-          1000 )
+    it 'should reset the interval value to the min value'
 
   describe 'Spec smart request', ->
     it 'should cancel the request if a destroy is pending after a create', (done) ->

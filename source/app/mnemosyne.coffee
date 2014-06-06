@@ -7,8 +7,6 @@ RequestManager = require "../app/request_manager"
   TODO
   * set db infos
   * documentation
-  * manage default options
-  * manage key conflicts
 ###
 
 
@@ -31,20 +29,9 @@ store.clear = ->
   localStorage.clear()
   return $.Deferred().resolve()
 
-
-defaultOptions =
-  forceRefresh: no
-  invalidCache: no
-
-defaultConstants =
-  ttl : 600 * 1000 # 10min
-  cache : true
-  allowExpiredCache :true
-
-
 read = (ctx, model, options, deferred) ->
 
-  if not model.getKey?()? or not model.constants.cache
+  if not model.getKey?()? or not model.cache.enabled
     console.log "Cache forbidden"
     return serverRead(ctx, model, options, null, deferred)
 
@@ -79,13 +66,13 @@ serverRead = (ctx, model, options, fallbackItem, deferred) ->
   Backbone.sync('read', model, options)
   .done ->
     console.log "Succeed sync from server"
-    cacheWrite(ctx, model.getKey(), arguments[0], model.constants.ttl)
+    cacheWrite(ctx, model.getKey(), arguments[0], model.cache.ttl)
     .always ->
       model.trigger(ctx.eventMap['synced'])
       deferred.resolve.apply(this, arguments)
   .fail (error) ->
     console.log "Fail sync from server"
-    if fallbackItem? and model.constants.allowExpiredCache
+    if fallbackItem? and model.cache.allowExpiredCache
       options.success?(fallbackItem.value, 'success', null)
       deferred?.resolve(fallbackItem.value)
       model.trigger(ctx.eventMap['synced'])
@@ -134,7 +121,7 @@ cacheWrite = (ctx, key, value, ttl) ->
 
 serverWrite = (ctx, method, model, options, deferred ) ->
   console.log "serverWrite"
-  cacheWrite(ctx, model.getKey(), model.attributes, model.constants.ttl)
+  cacheWrite(ctx, model.getKey(), model.attributes, model.cache.ttl)
   .done ->
     ctx.safeSync(method, model, options)
     .done ->
@@ -198,7 +185,13 @@ wrapPromise = (ctx, promise) ->
   ------- Public methods -------
 ###
 
+defaultOptions =
+  forceRefresh: no
 
+defaultCacheOptions =
+  ttl : 600 * 1000 # 10min
+  enabled : false
+  allowExpiredCache :true
 
 
 module.exports = class Mnemosyne extends RequestManager
@@ -209,8 +202,8 @@ module.exports = class Mnemosyne extends RequestManager
     _context = @
 
   cacheWrite : (model) ->
-    model.constants = _.defaults(model.constants or {}, defaultConstants)
-    cacheWrite(_context, model.getKey(), model.attributes, model.constants.ttl)
+    model.cache = _.defaults(model.cache or {}, defaultCacheOptions)
+    cacheWrite(_context, model.getKey(), model.attributes, model.cache.ttl)
 
   cacheRead  : (key) ->
     deferred = $.Deferred()
@@ -221,27 +214,13 @@ module.exports = class Mnemosyne extends RequestManager
 
     return deferred
 
-
-  ###
-    Cancel all pending requests.
-  ###
-  clear: ->
-    super
-
   ###
     Overrides the Backbone.sync method
-    var methodMap = {
-    'create': 'POST',
-    'update': 'PUT',
-    'patch':  'PATCH',
-    'delete': 'DELETE',
-    'read':   'GET'
-    };
   ###
   sync: (method, model, options = {}) ->
-    # #console.log "[.] sync #{method}, #{model?}, #{model.constants.cache}"
+    # #console.log "[.] sync #{method}, #{model?}, #{model.cache.enabled}"
     options = _.defaults(options, defaultOptions)
-    model.constants = _.defaults(model.constants or {}, defaultConstants)
+    model.cache = _.defaults(model.cache or {}, defaultCacheOptions)
     deferred = $.Deferred()
 
     console.log model.getKey()
@@ -258,7 +237,7 @@ module.exports = class Mnemosyne extends RequestManager
 
 
 mnemosyne = new Mnemosyne()
-Mnemosyne.Model = class Model extends Backbone.Model
+Backbone.Model = class Model extends Backbone.Model
   sync: -> mnemosyne.sync.apply this, arguments
   destroy: ->
     if @isNew()

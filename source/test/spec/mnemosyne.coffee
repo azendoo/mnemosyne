@@ -1,7 +1,7 @@
 module.exports = describe 'Mnemosyne specifications', ->
 
   server = null
-  model = null
+  model  = null
   model2 = null
   CustomModel = null
   Backbone  = require 'backbone'
@@ -10,19 +10,22 @@ module.exports = describe 'Mnemosyne specifications', ->
   serverSpy = null
 
 
-  setUpServerResponse = ->
+  setUpServerResponse = (statusCode = 200)->
     server.respondWith (xhr) ->
       serverSpy.call()
       xhr.respond(
-        200
+        statusCode
         "Content-Type": "application/json"
-        '{"id": 1, "time":'+new Date().getTime()+'}'
+        '{"id": 1, "time":' + new Date().getTime()+'}'
       )
 
 
   before ->
     mnemosyne = new Mnemosyne()
     class CustomModel extends Backbone.Model
+      cache:
+        enabled: true
+
       constructor: ->
         super
         @setTime(new Date().getTime())
@@ -31,7 +34,7 @@ module.exports = describe 'Mnemosyne specifications', ->
       getTime: -> @get('time')
       setTime: (value) -> @set('time', value)
       url: -> '/test_route'
-      sync: -> mnemosyne.sync.apply this, arguments
+      # sync: -> mnemosyne.sync.apply this, arguments
 
   beforeEach ->
     serverSpy = sinon.spy()
@@ -59,12 +62,13 @@ module.exports = describe 'Mnemosyne specifications', ->
 
     describe 'Read value', ->
       it 'should trigger "syncing" event on model', (done) ->
-        model.constants = {cache : true}
+        model.cache = {enabled : true}
         model.on "syncing", -> done()
         model.fetch()
 
       describe 'Cache valid', ->
         beforeEach (done) ->
+          model.cache = {enabled : true}
           mnemosyne.cacheWrite(model)
           .done -> done()
 
@@ -90,7 +94,7 @@ module.exports = describe 'Mnemosyne specifications', ->
 
       describe 'Cache expired', ->
         beforeEach (done) ->
-          model.constants = {cache : true, ttl: 0}
+          model.cache = {enabled : true, ttl: 0}
           model.setTime(0)
           mnemosyne.cacheWrite(model)
           .done -> done()
@@ -119,7 +123,7 @@ module.exports = describe 'Mnemosyne specifications', ->
 
         describe '"allowExpiredCache" set to false', ->
           beforeEach ->
-            model.constants.allowExpiredCache = false
+            model.cache.allowExpiredCache = false
 
           it 'should trigger "synced" event on model', (done) ->
             model.on "synced", ->
@@ -151,7 +155,7 @@ module.exports = describe 'Mnemosyne specifications', ->
           model.setTime(0)
           mnemosyne.cacheWrite(model)
           .done ->
-            model.constants = {cache : false}
+            model.cache = {enabled : false}
             done()
 
         it 'should trigger "synced" event on model', (done) ->
@@ -200,7 +204,7 @@ module.exports = describe 'Mnemosyne specifications', ->
           model.setTime(0)
           mnemosyne.cacheWrite(model)
           .done ->
-            model.constants = {cache : false}
+            model.cache = {enabled : false}
             done()
 
 
@@ -260,7 +264,7 @@ module.exports = describe 'Mnemosyne specifications', ->
 
       describe 'Cache expired', ->
         beforeEach (done) ->
-          model.constants = {cache : true, ttl: 0}
+          model.cache = {enabled : true, ttl: 0}
           model.setTime(19)
           mnemosyne.cacheWrite(model)
           .done -> done()
@@ -280,7 +284,7 @@ module.exports = describe 'Mnemosyne specifications', ->
 
         describe '"allowExpiredCache" set to false', ->
           beforeEach ->
-            model.constants.allowExpiredCache = false
+            model.cache.allowExpiredCache = false
 
           it 'should trigger "unsynced" event on model', (done) ->
             model.on "unsynced", -> done()
@@ -300,7 +304,7 @@ module.exports = describe 'Mnemosyne specifications', ->
           model.setTime(0)
           mnemosyne.cacheWrite(model)
           .done ->
-            model.constants = {cache : false}
+            model.cache = {enabled : false}
             done()
 
         it 'should trigger "unsynced" event on model', (done) ->
@@ -335,7 +339,7 @@ module.exports = describe 'Mnemosyne specifications', ->
           model.setTime(0)
           mnemosyne.cacheWrite(model)
           .done ->
-            model.constants = {cache : false}
+            model.cache = {enabled : false}
             done()
 
         it 'should trigger "pending" event on model', (done) ->
