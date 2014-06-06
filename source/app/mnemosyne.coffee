@@ -106,7 +106,7 @@ load = (ctx, key) ->
 cacheWrite = (ctx, key, value, ttl) ->
   deferred = $.Deferred()
 
-  expiredDate = (new Date()).getTime() + ttl
+  expiredDate = (new Date()).getTime() + ttl * 1000
   console.log "Try to write cache -- expires at #{expiredDate}"
   # store.setItem(model.getKey(), {'value' : model, 'expirationDate': expiredDate})
   store.setItem(key, {"value" : value, "expirationDate": expiredDate})
@@ -160,9 +160,9 @@ defaultOptions =
   forceRefresh: no
 
 defaultCacheOptions =
-  ttl : 600 * 1000 # 10min
-  enabled : false
-  allowExpiredCache :true
+  ttl               : 600 # 10min
+  enabled           : no
+  allowExpiredCache : yes
 
 
 module.exports = class Mnemosyne extends RequestManager
@@ -187,6 +187,9 @@ module.exports = class Mnemosyne extends RequestManager
 
   cacheRemove: (key) ->
     return store.removeItem(key)
+
+  clearCache: ->
+    return store.clear();
 
   ###
     Overrides the Backbone.sync method
