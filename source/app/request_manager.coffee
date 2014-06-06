@@ -104,7 +104,10 @@ consume = (ctx) ->
 
     status = error.readyState
     switch status
-      when 4, 5 then ctx.pendingRequests.retrieveHead()
+      when 4, 5
+        ctx.pendingRequests.retrieveHead()
+        request.model.trigger(ctx.eventMap['unsynced'])
+
       else ctx.pendingRequests.rotate()
 
     if ctx.interval < MAX_INTERVAL

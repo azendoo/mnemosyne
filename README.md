@@ -21,34 +21,57 @@ mnemosyne.reset();
 ### sync(method, model, options)
 See Backbonejs documentation for sync method.
 Mnemosyne also add some options to allow you to customize the behaviour.
+
+```
+options:
+  forceRefresh: boolean, default value false
+```
+
 Your model should have those attributes
 ```
 cache:
-    useCache: boolean, default value false
-    allowExpiredCache: boolean, default value true
-    ttl: integer value in seconds, default value 600 # 10min
+  enabled: boolean, default value false
+  allowExpiredCache: boolean, default value true
+  ttl: integer value in seconds, default value 600 # 10min
 ```
 
 The `ttl` defines a date from we have to refetch the data from server.
 If the `ttl` is expired and the `allowExpiredCache` is set to `true`,
-then the cache value is returned, and a **silent** fetch occurs. If the 
+then the cache value is returned, and a **silent** fetch occurs. If the
 `allowExpiredCache` is set to `false`, then the cache value is not used, and a
 fetch occurs.
 
 
-You can also set some `options`
-```
-forceRefresh: boolean, default value false
-invalideCache: boolean, default value false
-```
+- `sync(method, model, options)`
+  Try to sync the model.
+  As this method is asynchronous, it returns a `$.Deferred` object.
+  [(See jQuery documentation)](http://api.jquery.com/category/deferred-object/)
+
+  If the request succeeds, the deferred is resolved, and the `synced` event
+  is triggered on the model.
+
+  // TODO
+
+
 
 - `getPendingRequests()`
+  Return an array containing all pending requests
 
-- `retryRequest(index)`
+- `retrySync()`
+  Reset the timer and try a new synchronization.
 
-- `cancelPendingRequests()`
+- `clear()`
+  Clear all pending requests.
 
-- `cancelPendingRequest(index)`
+
+- `cancelPendingRequests(key)`
+  Cancel the selected pending request.
+
+- `cacheWrite(model)`
+  Save the model attributes in cache.
+
+- `cacheRead(key)`
+  Load attributes from cache.
 
 # Events
 
