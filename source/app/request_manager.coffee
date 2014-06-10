@@ -13,11 +13,6 @@ MagicQueue = require "../app/magic_queue"
   * Discuss about the status 4XX and 5XX
 ###
 
-defaultEventMap =
-  'syncing'     : 'syncing'
-  'pending'     : 'pending'
-  'synced'      : 'synced'
-  'unsynced'    : 'unsynced'
 
 MAX_INTERVAL= 64000 # 64 seconds
 MIN_INTERVAL= 250   # 250ms
@@ -33,7 +28,7 @@ resetTimer = (ctx) ->
 
 
 cancelRequest = (ctx, request) ->
-  request.model.trigger(ctx.eventMap['unsynced'])
+  request.model.unsync()
 
 
 pushRequest = (ctx, request) ->
@@ -46,7 +41,7 @@ pushRequest = (ctx, request) ->
 
   if (not isConnected())
     console.log '[pushRequest] -- not connected. Push request in queue'
-    request.model.trigger(ctx.eventMap['pending'])
+    request.model.pendingSync()
     if (not ctx.timeout?)
       consume(ctx)
     return deferred.resolve(request.model.attributes)
@@ -61,12 +56,12 @@ pushRequest = (ctx, request) ->
     localStorage.removeItem(request.key)
     ctx.pendingRequests.retrieveItem(request.key)
     deferred.resolve.apply(this, arguments)
-    request.model.trigger(ctx.eventMap['synced'])
+    request.model.finishSync()
   .fail (error) ->
     console.log '[pushRequest] -- Sync failed'
 
     deferred.resolve(request.model.attributes)
-    request.model.trigger(ctx.eventMap['pending'])
+    request.model.pendingSync()
     if (not ctx.timeout?)
       consume(ctx)
 
@@ -98,7 +93,7 @@ consume = (ctx) ->
 
     ctx.pendingRequests.retrieveHead()
     ctx.interval = MIN_INTERVAL
-    request.model.trigger(ctx.eventMap['synced'])
+    request.model.finishSync()
   .fail (error) ->
     console.log '[consume] -- Sync failed', error
 
@@ -106,7 +101,7 @@ consume = (ctx) ->
     switch status
       when 4, 5
         ctx.pendingRequests.retrieveHead()
-        request.model.trigger(ctx.eventMap['unsynced'])
+        request.model.unsync()
 
       else ctx.pendingRequests.rotate()
 
@@ -165,8 +160,7 @@ module.exports = class RequestManager
       key
   ###
 
-  constructor: (eventMap = {}) ->
-    @eventMap = _.extend(defaultEventMap, eventMap)
+  constructor: ->
     @pendingRequests = new MagicQueue()
     resetTimer(@)
 
@@ -203,5 +197,7 @@ module.exports = class RequestManager
     request.key     = model.getKey()
 
     request = smartRequest(@, request)
+
+    model.beginSync()
 
     return pushRequest(@, request)

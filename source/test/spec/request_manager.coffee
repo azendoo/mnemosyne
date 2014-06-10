@@ -50,6 +50,7 @@ module.exports = describe 'Request Manager specifications', ->
     setUpServerResponse()
     server.autoRespond = true
 
+
   describe 'Spec clear', ->
     it 'should stop the scheduler when the queue is empty', (done) ->
       expect(requestManager.timeout).to.not.exist
@@ -72,7 +73,6 @@ module.exports = describe 'Request Manager specifications', ->
           requestManager.clear()
           expect(requestManager.interval).to.equal(250)
           done()),250)
-
 
 
   describe 'Spec safeSync', ->
@@ -154,10 +154,9 @@ module.exports = describe 'Request Manager specifications', ->
       requestManager.safeSync('update', model1)
 
 
-
-
   describe 'Spec retrySync', ->
     it 'should reset the interval value to the min value'
+
 
   describe 'Spec smart request', ->
     it 'should cancel the request if a destroy is pending after a create', (done) ->

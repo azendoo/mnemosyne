@@ -103,11 +103,11 @@ module.exports = describe 'Mnemosyne specifications', ->
           model.on "synced", -> done()
           model.fetch()
 
-        it 'should get data from server', (done) ->
+        it 'should get data from cache', (done) ->
           model.setTime(17)
           model.fetch()
           .done ->
-            expect(model.getTime()).to.be.above(17)
+            expect(model.getTime()).to.equal(0)
             done()
 
         it 'should get data from cache, and after, update it with server data'

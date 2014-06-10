@@ -1,4 +1,5 @@
 RequestManager = require "../app/request_manager"
+SyncMachine    = require "../app/sync_machine"
 # Backbone = require "backbone"
 # _        = require "underscore"
 
@@ -58,7 +59,7 @@ cacheRead = (ctx, model, options, item, deferred) ->
     console.log "-- cache valid"
     options.success?(item.value, 'success', null)
     deferred?.resolve(item.value)
-    model.trigger(ctx.eventMap['synced'])
+    model.finishSync()
 
 
 serverRead = (ctx, model, options, fallbackItem, deferred) ->
@@ -68,7 +69,7 @@ serverRead = (ctx, model, options, fallbackItem, deferred) ->
   if fallbackItem? and model.cache.allowExpiredCache and not options.forceRefresh
     options.success?(fallbackItem.value, 'success', null)
     deferred.resolve(fallbackItem.value)
-    model.trigger(ctx.eventMap['synced'])
+    model.finishSync()
     options.silent = true
 
   Backbone.sync('read', model, options)
@@ -77,13 +78,13 @@ serverRead = (ctx, model, options, fallbackItem, deferred) ->
     cacheWrite(ctx, model.getKey(), arguments[0], model.cache.ttl)
     .always ->
       if deferred.state() isnt "resolved"
-        model.trigger(ctx.eventMap['synced'])
+        model.finishSync()
         deferred.resolve.apply(this, arguments)
   .fail (error) ->
     console.log "Fail sync from server"
     if deferred.state() isnt "resolved"
       deferred.reject.apply(this, arguments)
-      model.trigger(ctx.eventMap['unsynced'])
+      model.unsync()
 
 
 load = (ctx, key) ->
@@ -134,7 +135,7 @@ serverWrite = (ctx, method, model, options, deferred ) ->
   .fail ->
     console.log "fail"
     deferred.reject.apply this, arguments
-    model.trigger(ctx.eventMap['unsynced'])
+    model.unsync()
 
 
 ###
@@ -202,7 +203,7 @@ module.exports = class Mnemosyne extends RequestManager
 
     console.log "\n" + model.getKey()
 
-    model.trigger(_context.eventMap['syncing'])
+    model.beginSync()
     switch method
       when 'read'
         read(_context, model, options, deferred)
@@ -215,6 +216,22 @@ module.exports = class Mnemosyne extends RequestManager
 
 mnemosyne = new Mnemosyne()
 Backbone.Model = class Model extends Backbone.Model
+  initialize: ->
+    super
+    _.extend this, SyncMachine
+
+  sync: -> mnemosyne.sync.apply this, arguments
+  destroy: ->
+    if @isNew()
+      @cancelPendingRequest(@getKey())
+    else
+      super
+
+Backbone.Collection = class Collection extends Backbone.Collection
+  initialize: ->
+    super
+    _.extend this, SyncMachine
+
   sync: -> mnemosyne.sync.apply this, arguments
   destroy: ->
     if @isNew()
