@@ -212,6 +212,8 @@ module.exports = class Mnemosyne extends RequestManager
 
     return deferred
 
+  @SyncMachine = SyncMachine
+
 
 
 mnemosyne = new Mnemosyne()

@@ -688,6 +688,8 @@ module.exports = Mnemosyne = (function(_super) {
     return deferred;
   };
 
+  Mnemosyne.prototype.SyncMachine = SyncMachine;
+
   return Mnemosyne;
 
 })(RequestManager);
