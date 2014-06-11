@@ -3,7 +3,9 @@ module.exports = describe 'Mnemosyne specifications', ->
   server = null
   model  = null
   model2 = null
+  collection = null
   CustomModel = null
+  CustomCollection = null
   Backbone  = require 'backbone'
   Mnemosyne = require 'mnemosyne'
   mnemosyne = null
@@ -22,6 +24,9 @@ module.exports = describe 'Mnemosyne specifications', ->
 
   before ->
     mnemosyne = new Mnemosyne()
+    class CustomCollection extends Backbone.Collection
+      getKey: -> 'parentKey'
+
     class CustomModel extends Backbone.Model
       cache:
         enabled: true
@@ -31,10 +36,13 @@ module.exports = describe 'Mnemosyne specifications', ->
         @setTime(new Date().getTime())
 
       getKey: -> 'modelKey'
+      getParentKey: -> 'parentKey'
       getTime: -> @get('time')
       setTime: (value) -> @set('time', value)
       url: -> '/test_route'
       # sync: -> mnemosyne.sync.apply this, arguments
+
+
 
   beforeEach ->
     serverSpy = sinon.spy()
@@ -42,11 +50,12 @@ module.exports = describe 'Mnemosyne specifications', ->
     model = new CustomModel(id:1)
     model2 = new CustomModel(id:2)
 
-    # Clear the localStorage may break sinon.server
-    # mnemosyne.clear().done -> done()
+
+    collection = new CustomCollection()
 
   afterEach ->
     server.restore()
+    mnemosyne.clear()
 
   serverAutoRespondError = ->
     server.autoRespond = true
@@ -65,6 +74,46 @@ module.exports = describe 'Mnemosyne specifications', ->
         model.cache = {enabled : true}
         model.on "syncing", -> done()
         model.fetch()
+
+      it 'should write the collection in cache', (done) ->
+        collection.push(model2)
+        collection.push(model)
+        mnemosyne.cacheWrite(collection)
+        .done ->
+          mnemosyne.cacheRead(collection.getKey())
+          .done (value) ->
+            expect(value.length).equals(2)
+            done()
+
+      it 'should update the collection model', (done) ->
+        mnemosyne.cacheWrite(collection)
+        .done ->
+          mnemosyne.cacheRead(collection.getKey())
+          .done (value) ->
+            expect(value).to.be.empty
+            collection.push(model)
+            mnemosyne.cacheWrite(collection).done ->
+              model.setTime(256)
+              mnemosyne.cacheWrite(model)
+              .done ->
+                mnemosyne.cacheRead(collection.getKey())
+                .done (value) ->
+                  expect(value[0].time).equals(256)
+                  done()
+
+      it 'should add the model to the cache of the parent collection if the model is not new', (done) ->
+        collection.push(model)
+        mnemosyne.cacheWrite(collection).done ->
+          mnemosyne.cacheRead(collection.getKey())
+          .done (value) ->
+            expect(value.length).equals(1)
+            model2.save()
+            .done ->
+              mnemosyne.cacheRead(collection.getKey())
+              .done (value) ->
+                expect(value.length).equals(2)
+                done()
+
 
       describe 'Cache valid', ->
         beforeEach (done) ->

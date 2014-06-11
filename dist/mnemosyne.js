@@ -185,7 +185,8 @@ pushRequest = function(ctx, request) {
     localStorage.removeItem(request.key);
     ctx.pendingRequests.retrieveItem(request.key);
     deferred.resolve.apply(this, arguments);
-    return request.model.finishSync();
+    request.model.finishSync();
+    return request.model.trigger('mnemosyne:writeCache');
   }).fail(function(error) {
     console.log('[pushRequest] -- Sync failed');
     deferred.resolve(request.model.attributes);
@@ -221,7 +222,8 @@ consume = function(ctx) {
     console.log('[consume] --Sync success');
     ctx.pendingRequests.retrieveHead();
     ctx.interval = MIN_INTERVAL;
-    return request.model.finishSync();
+    request.model.finishSync();
+    return request.model.trigger('mnemosyne:writeCache');
   }).fail(function(error) {
     var status;
     console.log('[consume] -- Sync failed', error);
@@ -449,7 +451,7 @@ module.exports = SyncMachine;
 
 });
 
-define('mnemosyne',['require','exports','module','../app/request_manager','../app/sync_machine'],function (require, exports, module) {var Collection, Mnemosyne, Model, RequestManager, SyncMachine, cacheRead, cacheWrite, defaultCacheOptions, defaultOptions, load, mnemosyne, read, serverRead, serverWrite, store, wrapPromise,
+define('mnemosyne',['require','exports','module','../app/request_manager','../app/sync_machine'],function (require, exports, module) {var Collection, Mnemosyne, Model, RequestManager, SyncMachine, cacheRead, defaultCacheOptions, defaultOptions, load, mnemosyne, read, serverRead, serverWrite, store, updateCache, updateParentCache, wrapPromise,
   __hasProp = {}.hasOwnProperty,
   __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
 
@@ -496,7 +498,7 @@ read = function(ctx, model, options, deferred) {
     return serverRead(ctx, model, options, null, deferred);
   }
   console.log("Try loading value from cache");
-  return load(ctx, model.getKey()).done(function(item) {
+  return load(model.getKey()).done(function(item) {
     console.log("Succeed to read from cache");
     return cacheRead(ctx, model, options, item, deferred);
   }).fail(function() {
@@ -533,7 +535,8 @@ serverRead = function(ctx, model, options, fallbackItem, deferred) {
   }
   return Backbone.sync('read', model, options).done(function() {
     console.log("Succeed sync from server");
-    return cacheWrite(ctx, model.getKey(), arguments[0], model.cache.ttl).always(function() {
+    model.attributes = arguments[0];
+    return updateCache(model).always(function() {
       if (deferred.state() !== "resolved") {
         model.finishSync();
         return deferred.resolve.apply(this, arguments);
@@ -548,7 +551,7 @@ serverRead = function(ctx, model, options, fallbackItem, deferred) {
   });
 };
 
-load = function(ctx, key) {
+load = function(key) {
   var deferred;
   deferred = $.Deferred();
   store.getItem(key).then(function(item) {
@@ -563,17 +566,65 @@ load = function(ctx, key) {
   return deferred;
 };
 
-cacheWrite = function(ctx, key, value, ttl) {
-  var deferred, expiredDate;
+updateParentCache = function(model) {
+  var deferred, parentKey;
   deferred = $.Deferred();
-  expiredDate = (new Date()).getTime() + ttl * 1000;
+  if ((model.models != null) || !(typeof model.getParentKey === "function" ? model.getParentKey() : void 0)) {
+    return deferred.resolve();
+  }
+  console.log("Updating parent cache");
+  parentKey = model.getParentKey();
+  load(parentKey).done(function(item) {
+    var models, parentModel;
+    models = item.value;
+    if (model.isNew()) {
+      console.warn("" + model.prototype.name + " should implements 'equals' method");
+    } else {
+      parentModel = _.findWhere(models, {
+        "id": model.get('id')
+      });
+      if (parentModel != null) {
+        _.extend(parentModel, model.attributes);
+      } else {
+        models.unshift(model.attributes);
+      }
+    }
+    return store.setItem(parentKey, {
+      "value": models,
+      "expirationDate": item.expiredDate
+    }).always(function() {
+      return deferred.resolve();
+    });
+  }).fail(function() {
+    return deferred.reject();
+  });
+  return deferred;
+};
+
+updateCache = function(model) {
+  var deferred, expiredDate, value;
+  deferred = $.Deferred();
+  expiredDate = (new Date()).getTime() + model.cache.ttl * 1000;
   console.log("Try to write cache -- expires at " + expiredDate);
-  store.setItem(key, {
+  value = null;
+  if (model.models == null) {
+    value = model.attributes;
+  } else if (model.models != null) {
+    value = _.map(model.models, function(m) {
+      return m.attributes;
+    });
+  } else {
+    console.warn("Wrong instance for ", model);
+    return deferred.reject();
+  }
+  store.setItem(model.getKey(), {
     "value": value,
     "expirationDate": expiredDate
   }).then(function() {
     console.log("Succeed cache write");
-    return deferred.resolve.apply(this, arguments);
+    return updateParentCache(model).always(function() {
+      return deferred.resolve.apply(this, arguments);
+    });
   }, function() {
     console.log("fail cache write");
     return deferred.reject.apply(this, arguments);
@@ -583,7 +634,11 @@ cacheWrite = function(ctx, key, value, ttl) {
 
 serverWrite = function(ctx, method, model, options, deferred) {
   console.log("serverWrite");
-  return cacheWrite(ctx, model.getKey(), model.attributes, model.cache.ttl).done(function() {
+  return updateCache(model).done(function() {
+    model.off('mnemosyne:writeCache');
+    model.on('mnemosyne:writeCache', function() {
+      return updateCache(model);
+    });
     return ctx.safeSync(method, model, options).done(function() {
       return deferred.resolve.apply(this, arguments);
     }).fail(function() {
@@ -592,7 +647,8 @@ serverWrite = function(ctx, method, model, options, deferred) {
   }).fail(function() {
     console.log("fail");
     deferred.reject.apply(this, arguments);
-    return model.unsync();
+    model.unsync();
+    return store.removeItem(model.getKey());
   });
 };
 
@@ -641,7 +697,7 @@ module.exports = Mnemosyne = (function(_super) {
 
   Mnemosyne.prototype.cacheWrite = function(model) {
     model.cache = _.defaults(model.cache || {}, defaultCacheOptions);
-    return cacheWrite(_context, model.getKey(), model.attributes, model.cache.ttl);
+    return updateCache(model);
   };
 
   Mnemosyne.prototype.cacheRead = function(key) {
@@ -688,7 +744,7 @@ module.exports = Mnemosyne = (function(_super) {
     return deferred;
   };
 
-  Mnemosyne.prototype.SyncMachine = SyncMachine;
+  Mnemosyne.SyncMachine = SyncMachine;
 
   return Mnemosyne;
 
@@ -751,6 +807,10 @@ Backbone.Collection = Collection = (function(_super) {
   return Collection;
 
 })(Backbone.Collection);
+
+Mnemosyne.Model = Backbone.Model;
+
+Mnemosyne.Collection = Backbone.Collection;
 
 });
 

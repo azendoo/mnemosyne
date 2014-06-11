@@ -57,6 +57,8 @@ pushRequest = (ctx, request) ->
     ctx.pendingRequests.retrieveItem(request.key)
     deferred.resolve.apply(this, arguments)
     request.model.finishSync()
+    request.model.trigger('mnemosyne:writeCache')
+
   .fail (error) ->
     console.log '[pushRequest] -- Sync failed'
 
@@ -94,6 +96,7 @@ consume = (ctx) ->
     ctx.pendingRequests.retrieveHead()
     ctx.interval = MIN_INTERVAL
     request.model.finishSync()
+    request.model.trigger('mnemosyne:writeCache')
   .fail (error) ->
     console.log '[consume] -- Sync failed', error
 

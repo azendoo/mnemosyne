@@ -26,6 +26,7 @@ store.setItem = (key, value) ->
   localStorage.setItem(key, JSON.stringify(value))
   return $.Deferred().resolve()
 
+
 store.clear = ->
   localStorage.clear()
   return $.Deferred().resolve()
@@ -38,7 +39,7 @@ read = (ctx, model, options, deferred) ->
     return serverRead(ctx, model, options, null, deferred)
 
   console.log "Try loading value from cache"
-  load(ctx, model.getKey())
+  load(model.getKey())
   .done (item) ->
     console.log "Succeed to read from cache"
     cacheRead(ctx, model, options, item, deferred)
@@ -75,7 +76,8 @@ serverRead = (ctx, model, options, fallbackItem, deferred) ->
   Backbone.sync('read', model, options)
   .done ->
     console.log "Succeed sync from server"
-    cacheWrite(ctx, model.getKey(), arguments[0], model.cache.ttl)
+    model.attributes = arguments[0]
+    updateCache(model)
     .always ->
       if deferred.state() isnt "resolved"
         model.finishSync()
@@ -87,7 +89,7 @@ serverRead = (ctx, model, options, fallbackItem, deferred) ->
       model.unsync()
 
 
-load = (ctx, key) ->
+load = (key) ->
   deferred = $.Deferred()
 
   store.getItem(key)
@@ -104,17 +106,57 @@ load = (ctx, key) ->
   return deferred
 
 
-cacheWrite = (ctx, key, value, ttl) ->
+updateParentCache = (model) ->
   deferred = $.Deferred()
 
-  expiredDate = (new Date()).getTime() + ttl * 1000
+  # return deferred.resolve()  if model instanceof Backbone.Collection
+  return deferred.resolve()  if model.models? or not model.getParentKey?()
+  console.log "Updating parent cache"
+  parentKey = model.getParentKey()
+  load(parentKey)
+  .done (item) ->
+    models = item.value
+    if model.isNew()
+      # Implements 'equals' method for each model ?
+      console.warn "#{model.prototype.name} should implements 'equals' method"
+    else
+      parentModel = _.findWhere(models, "id": model.get('id'))
+      if parentModel?
+        _.extend(parentModel, model.attributes)
+      else
+        models.unshift(model.attributes)
+    store.setItem(parentKey, {"value" : models, "expirationDate": item.expiredDate})
+    .always ->
+      deferred.resolve()
+  .fail -> deferred.reject()
+
+  return deferred
+
+updateCache = (model) ->
+  deferred = $.Deferred()
+
+  expiredDate = (new Date()).getTime() + model.cache.ttl * 1000
   console.log "Try to write cache -- expires at #{expiredDate}"
   # store.setItem(model.getKey(), {'value' : model, 'expirationDate': expiredDate})
-  store.setItem(key, {"value" : value, "expirationDate": expiredDate})
+
+  value = null
+  # if model instanceof Backbone.Model
+  if not model.models?
+    value = model.attributes
+  # else if model instanceof Backbone.Collection
+   else if model.models?
+    value = _.map(model.models, (m) -> m.attributes)
+  else
+    console.warn "Wrong instance for ", model
+    return deferred.reject()
+
+  store.setItem(model.getKey(), {"value" : value, "expirationDate": expiredDate})
   .then(
     ->
       console.log "Succeed cache write"
-      deferred.resolve.apply(this, arguments)
+      updateParentCache(model)
+      .always ->
+        deferred.resolve.apply(this, arguments)
     ->
       console.log "fail cache write"
       deferred.reject.apply(this, arguments)
@@ -125,8 +167,12 @@ cacheWrite = (ctx, key, value, ttl) ->
 
 serverWrite = (ctx, method, model, options, deferred ) ->
   console.log "serverWrite"
-  cacheWrite(ctx, model.getKey(), model.attributes, model.cache.ttl)
+
+  updateCache(model)
   .done ->
+    # register event to trigger the cache update
+    model.off('mnemosyne:writeCache')
+    model.on('mnemosyne:writeCache', -> updateCache(model))
     ctx.safeSync(method, model, options)
     .done ->
       deferred.resolve.apply this, arguments
@@ -136,6 +182,7 @@ serverWrite = (ctx, method, model, options, deferred ) ->
     console.log "fail"
     deferred.reject.apply this, arguments
     model.unsync()
+    store.removeItem(model.getKey())
 
 
 ###
@@ -173,9 +220,11 @@ module.exports = class Mnemosyne extends RequestManager
     super
     _context = @
 
+
   cacheWrite : (model) ->
     model.cache = _.defaults(model.cache or {}, defaultCacheOptions)
-    cacheWrite(_context, model.getKey(), model.attributes, model.cache.ttl)
+    updateCache(model)
+
 
   cacheRead  : (key) ->
     deferred = $.Deferred()
@@ -186,8 +235,10 @@ module.exports = class Mnemosyne extends RequestManager
 
     return deferred
 
+
   cacheRemove: (key) ->
     return store.removeItem(key)
+
 
   clearCache: ->
     return store.clear();
@@ -240,3 +291,6 @@ Backbone.Collection = class Collection extends Backbone.Collection
       @cancelPendingRequest(@getKey())
     else
       super
+
+Mnemosyne.Model = Backbone.Model
+Mnemosyne.Collection = Backbone.Collection
