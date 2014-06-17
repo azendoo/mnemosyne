@@ -6,7 +6,6 @@ Utils      = require "../app/utils"
 # _        = require "underscore"
 
 
-
 MAX_INTERVAL= 64000 # 64 seconds
 MIN_INTERVAL= 250   # 250ms
 
@@ -17,16 +16,12 @@ resetTimer = (ctx) ->
   ctx.interval = MIN_INTERVAL
 
 
-cancelRequest = (ctx, request) ->
-  request.model.unsync()
-
-
 pushRequest = (ctx, request) ->
   deferred = $.Deferred()
   return deferred.reject() if not request?
   ctx.pendingRequests.addTail(request.key, request)
 
-  method = getMethod(request);
+  method = getMethod(request)
   options = request.methods[method]
 
   # DEBUG
@@ -36,7 +31,7 @@ pushRequest = (ctx, request) ->
 
   if (not Utils.isConnected())
     console.log '[pushRequest] -- not connected. Push request in queue'
-    request.model.pendingSync()
+    ctx.callbacks.onPending(request.model)
     if (not ctx.timeout?)
       consume(ctx)
     return deferred.resolve(request.model.attributes)
@@ -46,17 +41,17 @@ pushRequest = (ctx, request) ->
   Backbone.sync(method, request.model, options)
   .done ->
     console.log '[pushRequest] -- Sync success'
-    # TODO use localforage
 
-    Utils.store.removeItem(request.key)
-    ctx.pendingRequests.retrieveItem(request.key)
-    deferred.resolve.apply(this, arguments)
-    ctx.callbacks.onSynced(request.model)
+    removeMethod(request, method)
+    if isRequestEmpty(request)
+      ctx.pendingRequests.retrieveItem(request.key)
+      deferred.resolve.apply(this, arguments)
+      ctx.callbacks.onSynced(request.model)
 
   .fail (error) ->
     console.log '[pushRequest] -- Sync failed'
 
-    # Create a pending id
+    # Attach a pending id
     request.model.attributes._pending_id = new Date().getTime()
     deferred.resolve(request.model.attributes)
     ctx.callbacks.onPending(request.model)
@@ -93,9 +88,13 @@ consume = (ctx) ->
   .done ->
     console.log '[consume] -- Sync success'
 
-    ctx.pendingRequests.retrieveHead()
+    removeMethod(request, method)
+    if isRequestEmpty(request)
+      ctx.pendingRequests.retrieveHead()
+      deferred.resolve.apply(this, arguments)
+      ctx.callbacks.onSynced(request.model)
+
     ctx.interval = MIN_INTERVAL
-    ctx.callbacks.onSynced(request.model)
 
   .fail (error) ->
     console.log '[consume] -- Sync failed', error
@@ -130,18 +129,28 @@ smartRequest= (ctx, request) ->
 
   return request
 
+
+removeMethod = (request, method) ->
+  delete request.methods[method]
+
+
+isRequestEmpty = (request) ->
+  return Object.keys(request.methods).length is 0
+
+
 getMethod= (request) ->
   if request.methods['create']
     return 'create'
 
   else if request.methods['update']
-    return 'udpate'
+    return 'update'
 
   else if request.methods['delete']
     return 'delete'
 
   else
     console.error "No method found !", request
+
 
 defaultCallbacks =
   onSynced    : ->
@@ -157,7 +166,7 @@ module.exports = class RequestManager
 
 
   clear: ->
-    @pendingRequests.getQueue().map((request) => cancelRequest(@, request))
+    @pendingRequests.getQueue().map((request) => @callbacks.onCancelled(request.model))
     resetTimer(@)
     @pendingRequests.clear()
 
@@ -174,7 +183,7 @@ module.exports = class RequestManager
   cancelPendingRequest: (key) ->
     request = @pendingRequests.retrieveItem(key)
     return if not request?
-    cancelRequest(@, request)
+    @callbacks.onCancelled(request.model)
 
 
   safeSync: (method, model, options = {}) ->

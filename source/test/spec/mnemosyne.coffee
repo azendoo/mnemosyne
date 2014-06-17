@@ -40,11 +40,12 @@ module.exports = describe 'Mnemosyne specifications', ->
       getTime: -> @get('time')
       setTime: (value) -> @set('time', value)
       url: -> '/test_route'
-      # sync: -> mnemosyne.sync.apply this, arguments
 
 
 
   beforeEach ->
+    mnemosyne = null
+    mnemosyne = new Mnemosyne()
     serverSpy = sinon.spy()
     server = sinon.fakeServer.create()
     model = new CustomModel(id:1)
@@ -56,6 +57,7 @@ module.exports = describe 'Mnemosyne specifications', ->
   afterEach ->
     server.restore()
     mnemosyne.clear()
+
 
   serverAutoRespondError = ->
     server.autoRespond = true

@@ -200,6 +200,11 @@ wrapPromise = (ctx, promise) ->
     )
   return deferred
 
+removePendingModel = (ctx, model) ->
+  ctx._offlineModels = _.filter(ctx._offlineModels, (m) -> not m.equals(model))
+  key = model.getKey()
+  ctx._offlineCollections[key] = _.filter(ctx._offlineCollections[key], (m) -> not m.equals(model))
+
 
 
 ###
@@ -229,17 +234,33 @@ module.exports = class Mnemosyne
   constructor: ->
     @_requestManager = new RequestManager
       onSynced    : (model) ->
-        # Remove the model from offline models
-        _context.offlineModels = _.filter(_context.offlineModels, (m) -> not m.equals(model))
+        if Utils.isModel(model)
+          # DEBUG
+          if model.isNew()
+            console.warn "Model has not been updated yet !"
+
+          #Add model to parent collection cache
+          updateParentCache(_context, model)
+
+          # Remove the model from offline models and collection
+          removePendingModel(_context, model)
         model.finishSync()
+
       onPending   : (model) ->
         # Add the model to offline models
         Utils.addWithoutDuplicates(_context.offlineModels, model)
         model.pendingSync()
       onCancelled : (model) ->
-        # Remove the model from offline models
-        _context.offlineModels = _.filter(_context.offlineModels, (m) -> not m.equals(model))
-        model.abortSync()
+        if Utils.isModel(model)
+          # DEBUG
+          if model.isNew()
+            console.warn "Model has not been updated yet !"
+
+            # Remove the model from offline models and collection
+            removePendingModel(_context, model)
+          else
+            console.log "TODO rollback"
+        model.unsync()
 
     _context = @
 
@@ -282,6 +303,8 @@ module.exports = class Mnemosyne
 
 
   clear: ->
+    _context._offlineCollections = []
+    _context._offlineModels = []
     _context._requestManager.clear()
 
 

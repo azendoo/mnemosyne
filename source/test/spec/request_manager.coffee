@@ -22,7 +22,7 @@ module.exports = describe 'Request Manager specifications', ->
     requestManager = new RequestManager
       onSynced    : (model) -> model.finishSync()
       onPending   : (model) -> model.pendingSync()
-      onCancelled : (model) -> model.abortSync()
+      onCancelled : (model) -> model.unsync()
     requestManager.clear()
 
     class CustomModel extends Backbone.Model
