@@ -219,7 +219,7 @@ consume = function(ctx) {
   options = request.methods[method];
   console.log('[consume] -- try sync ', method);
   return Backbone.sync(method, request.model, options).done(function() {
-    console.log('[consume] --Sync success');
+    console.log('[consume] -- Sync success');
     ctx.pendingRequests.retrieveHead();
     ctx.interval = MIN_INTERVAL;
     request.model.finishSync();
@@ -451,7 +451,7 @@ module.exports = SyncMachine;
 
 });
 
-define('mnemosyne',['require','exports','module','../app/request_manager','../app/sync_machine'],function (require, exports, module) {var Collection, Mnemosyne, Model, RequestManager, SyncMachine, cacheRead, defaultCacheOptions, defaultOptions, load, mnemosyne, read, serverRead, serverWrite, store, updateCache, updateParentCache, wrapPromise,
+define('mnemosyne',['require','exports','module','../app/request_manager','../app/sync_machine'],function (require, exports, module) {var Collection, Mnemosyne, Model, RequestManager, SyncMachine, cacheRead, defaultCacheOptions, defaultOptions, isConnected, load, mnemosyne, read, serverRead, serverWrite, store, updateCache, updateParentCache, wrapPromise,
   __hasProp = {}.hasOwnProperty,
   __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
 
@@ -465,6 +465,10 @@ SyncMachine = require("../app/sync_machine");
   * set db infos
   * documentation
  */
+
+isConnected = function() {
+  return window.navigator.onLine;
+};
 
 
 /*
@@ -533,6 +537,11 @@ serverRead = function(ctx, model, options, fallbackItem, deferred) {
     model.finishSync();
     options.silent = true;
   }
+  if (!isConnected()) {
+    model.finishSync();
+    console.log('No connection');
+    return deferred.reject();
+  }
   return Backbone.sync('read', model, options).done(function() {
     console.log("Succeed sync from server");
     model.attributes = arguments[0];
@@ -569,7 +578,7 @@ load = function(key) {
 updateParentCache = function(model) {
   var deferred, parentKey;
   deferred = $.Deferred();
-  if ((model.models != null) || !(typeof model.getParentKey === "function" ? model.getParentKey() : void 0)) {
+  if ((model.models != null) || typeof model.getParentKey !== 'function') {
     return deferred.resolve();
   }
   console.log("Updating parent cache");
@@ -577,8 +586,19 @@ updateParentCache = function(model) {
   load(parentKey).done(function(item) {
     var models, parentModel;
     models = item.value;
-    if (model.isNew()) {
-      console.warn("" + model.prototype.name + " should implements 'equals' method");
+    if (model.isNew() != null) {
+      if (typeof model.equals !== 'function') {
+        console.warn("" + model + " should implements 'equals' method");
+        return deferred.reject();
+      }
+      parentModel = _.find(models, function(m) {
+        return model.equals(m);
+      });
+      if (parentModel != null) {
+        _.extend(parentModel, model.attributes);
+      } else {
+        models.unshift(model.attributes);
+      }
     } else {
       parentModel = _.findWhere(models, {
         "id": model.get('id')
@@ -591,12 +611,16 @@ updateParentCache = function(model) {
     }
     return store.setItem(parentKey, {
       "value": models,
-      "expirationDate": item.expiredDate
+      "expirationDate": 0
     }).always(function() {
       return deferred.resolve();
     });
   }).fail(function() {
-    return deferred.reject();
+    store.setItem(parentKey, {
+      "value": [model],
+      "expirationDate": 0
+    });
+    return deferred.resolve();
   });
   return deferred;
 };
@@ -678,7 +702,7 @@ defaultOptions = {
 };
 
 defaultCacheOptions = {
-  ttl: 600,
+  ttl: 0,
   enabled: false,
   allowExpiredCache: true
 };
@@ -715,7 +739,7 @@ module.exports = Mnemosyne = (function(_super) {
     return store.removeItem(key);
   };
 
-  Mnemosyne.prototype.clearCache = function() {
+  Mnemosyne.prototype.cacheClear = function() {
     return store.clear();
   };
 

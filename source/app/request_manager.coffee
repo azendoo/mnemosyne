@@ -1,29 +1,19 @@
 MagicQueue = require "../app/magic_queue"
+Utils      = require "../app/utils"
+
 # localforage = require "localforage"
 # Backbone = require "backbone"
 # _        = require "underscore"
 
-###
-  TODO
-  * limit the number of pending requests ?
-  * manage the database limit
-  * documentation
-  * set models status according to events, and update the cache
-  * request db persistence
-  * Discuss about the status 4XX and 5XX
-###
 
 
 MAX_INTERVAL= 64000 # 64 seconds
 MIN_INTERVAL= 250   # 250ms
 
-###
-  ------- Private methods -------
-###
 
 resetTimer = (ctx) ->
   clearTimeout(ctx.timeout)
-  ctx.timeout = null
+  ctx.timeout  = null
   ctx.interval = MIN_INTERVAL
 
 
@@ -39,7 +29,12 @@ pushRequest = (ctx, request) ->
   method = getMethod(request);
   options = request.methods[method]
 
-  if (not isConnected())
+  # DEBUG
+  pendingId = request.model.get('_pending_id')
+  if pendingId?
+    console.warn "[pushRequest] -- pendingId already set!!"
+
+  if (not Utils.isConnected())
     console.log '[pushRequest] -- not connected. Push request in queue'
     request.model.pendingSync()
     if (not ctx.timeout?)
@@ -53,17 +48,18 @@ pushRequest = (ctx, request) ->
     console.log '[pushRequest] -- Sync success'
     # TODO use localforage
 
-    localStorage.removeItem(request.key)
+    Utils.store.removeItem(request.key)
     ctx.pendingRequests.retrieveItem(request.key)
     deferred.resolve.apply(this, arguments)
-    request.model.finishSync()
-    request.model.trigger('mnemosyne:writeCache')
+    ctx.callbacks.onSynced(request.model)
 
   .fail (error) ->
     console.log '[pushRequest] -- Sync failed'
 
+    # Create a pending id
+    request.model.attributes._pending_id = new Date().getTime()
     deferred.resolve(request.model.attributes)
-    request.model.pendingSync()
+    ctx.callbacks.onPending(request.model)
     if (not ctx.timeout?)
       consume(ctx)
 
@@ -78,7 +74,7 @@ consume = (ctx) ->
     resetTimer(ctx)
     return
 
-  if (not isConnected())
+  if (not Utils.isConnected())
     if ctx.interval < MAX_INTERVAL
       ctx.interval = ctx.interval * 2
     console.log '[consume] -- not connected, next try in ', ctx.interval
@@ -86,17 +82,21 @@ consume = (ctx) ->
 
   method  = getMethod(request);
   options = request.methods[method]
+  pendingId = request.model.get('_pending_id')
+
+  # Clean attributes before sync
+  delete request.model.attributes._pending_id
 
   console.log '[consume] -- try sync ', method
 
   Backbone.sync(method, request.model, options)
   .done ->
-    console.log '[consume] --Sync success'
+    console.log '[consume] -- Sync success'
 
     ctx.pendingRequests.retrieveHead()
     ctx.interval = MIN_INTERVAL
-    request.model.finishSync()
-    request.model.trigger('mnemosyne:writeCache')
+    ctx.callbacks.onSynced(request.model)
+
   .fail (error) ->
     console.log '[consume] -- Sync failed', error
 
@@ -104,19 +104,17 @@ consume = (ctx) ->
     switch status
       when 4, 5
         ctx.pendingRequests.retrieveHead()
-        request.model.unsync()
+        ctx.callbacks.onCancelled(request.model)
 
-      else ctx.pendingRequests.rotate()
+      else
+        request.model.attributes._pending_id = pendingId
+        ctx.pendingRequests.rotate()
 
     if ctx.interval < MAX_INTERVAL
       ctx.interval = ctx.interval * 2
   .always ->
     ctx.timeout  = setTimeout( (-> consume(ctx) ), ctx.interval)
 
-
-# TODO manage connection on mobile devices
-isConnected= ->
-  return window.navigator.onLine
 
 # Optimize request avoiding to send some useless data
 # TODO add 'patch':  'PATCH',
@@ -145,25 +143,15 @@ getMethod= (request) ->
   else
     console.error "No method found !", request
 
-###
-  ------- Public methods -------
-###
-
-
-
+defaultCallbacks =
+  onSynced    : ->
+  onPending   : ->
+  onCancelled : ->
 
 module.exports = class RequestManager
 
-
-  ###
-    request:
-      method
-      model
-      options
-      key
-  ###
-
-  constructor: ->
+  constructor: (@callbacks={}) ->
+    _.defaults(@callbacks, defaultCallbacks)
     @pendingRequests = new MagicQueue()
     resetTimer(@)
 

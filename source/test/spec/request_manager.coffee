@@ -19,7 +19,10 @@ module.exports = describe 'Request Manager specifications', ->
         )
 
   beforeEach ->
-    requestManager = new RequestManager()
+    requestManager = new RequestManager
+      onSynced    : (model) -> model.finishSync()
+      onPending   : (model) -> model.pendingSync()
+      onCancelled : (model) -> model.abortSync()
     requestManager.clear()
 
     class CustomModel extends Backbone.Model
@@ -36,11 +39,9 @@ module.exports = describe 'Request Manager specifications', ->
     model2 = new CustomModel(id:2)
     model3 = new CustomModel(id:3)
 
-    # Clear the localStorage may break sinon.server
-    # mnemosyne.clear().done -> done()
-
   afterEach ->
     server.restore()
+
 
 
   serverAutoRespondError = ->
