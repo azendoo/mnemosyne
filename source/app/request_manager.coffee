@@ -31,6 +31,7 @@ pushRequest = (ctx, request) ->
 
   if (not Utils.isConnected())
     console.log '[pushRequest] -- not connected. Push request in queue'
+    request.model.attributes['_pending_id'] = new Date().getTime()
     ctx.callbacks.onPending(request.model)
     if (not ctx.timeout?)
       consume(ctx)
@@ -52,7 +53,7 @@ pushRequest = (ctx, request) ->
     console.log '[pushRequest] -- Sync failed'
 
     # Attach a pending id
-    request.model.attributes._pending_id = new Date().getTime()
+    request.model.attributes['_pending_id'] = new Date().getTime()
     ctx.callbacks.onPending(request.model)
     deferred.resolve(request.model.attributes)
     if (not ctx.timeout?)
@@ -87,7 +88,7 @@ consume = (ctx) ->
   Backbone.sync(method, request.model, options)
   .done ->
     console.log '[consume] -- Sync success'
-
+    request.model.attributes._pending_id = pendingId
     removeMethod(request, method)
     if isRequestEmpty(request)
       ctx.pendingRequests.retrieveHead()

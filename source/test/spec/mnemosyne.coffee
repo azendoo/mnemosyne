@@ -3,6 +3,7 @@ module.exports = describe 'Mnemosyne specifications', ->
   server = null
   model  = null
   model2 = null
+  newModel = null
   collection = null
   CustomModel = null
   CustomCollection = null
@@ -26,6 +27,7 @@ module.exports = describe 'Mnemosyne specifications', ->
     mnemosyne = new Mnemosyne()
     class CustomCollection extends Backbone.Collection
       getKey: -> 'parentKey'
+      url: -> '/test_route'
 
     class CustomModel extends Backbone.Model
       cache:
@@ -327,14 +329,33 @@ module.exports = describe 'Mnemosyne specifications', ->
           serverAutoRespondOk()
 
         newModel.on 'synced', ->
+          expect(pending).to.be.true
           expect(mnemosyne._offlineModels).to.be.empty
           done()
 
         newModel.setTime(17)
         newModel.save()
 
-      # TODO
-      it 'should add the new model to pendings models when'
+      it 'should add the new model to offlineModels', (done) ->
+        newModel.on 'pending', ->
+          expect(mnemosyne._offlineModels.length).equals(1)
+          done()
+
+        newModel.save()
+
+      it 'should add the new model to offlineCollections', (done) ->
+        newModel.on 'pending', ->
+          expect(mnemosyne._offlineCollections[newModel.getParentKey()].length).equals(1)
+          done()
+
+        newModel.save()
+
+      it 'should add the pending model to the fetched collection', (done) ->
+        expect(collection.models).to.be.empty
+        mnemosyne._offlineCollections[collection.getKey()] = [newModel]
+        collection.fetch().always ->
+          expect(collection.models).not.be.empty
+          done()
 
 
     it 'should trigger "syncing" event on model', (done) ->

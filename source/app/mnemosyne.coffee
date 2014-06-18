@@ -32,6 +32,10 @@ read = (ctx, model, options) ->
 cacheRead = (ctx, model, options, item, deferred) ->
   # -- Cache expired
 
+  # DEBUG
+  if Utils.isCollection(model)
+    _.map(item.value, (element) -> console.warn('New model read in cache !') if not element.id?)
+
   if options.forceRefresh or item.expirationDate < new Date().getTime()
     console.log "-- cache expired"
     serverRead(ctx, model, options, item, deferred)
@@ -49,7 +53,7 @@ serverRead = (ctx, model, options, fallbackItem, deferred) ->
 
   # Return cache data and update silently the cache
   if fallbackItem? and model.cache.allowExpiredCache and not options.forceRefresh
-    options.success?(fallbackItem.value, 'success', null)
+    # options.success?(fallbackItem.value, 'success', null)
     deferred.resolve(fallbackItem.value)
     model.finishSync()
     options.silent = true
@@ -57,7 +61,7 @@ serverRead = (ctx, model, options, fallbackItem, deferred) ->
   if not Utils.isConnected()
     model.finishSync()
     console.log 'No connection'
-    if isCollection(model)
+    if Utils.isCollection(model)
       return deferred.resolve([])
     else
       return deferred.reject()
@@ -135,7 +139,7 @@ updateParentCache = (ctx, model) ->
   if model.isNew()
     # just add to unsynced models and collections
     ctx._offlineCollections[parentKey] ?= []
-    Utils.addWithoutDuplicates(ctx._offlineCollections[parentKey], model)
+    ctx._offlineCollections[parentKey] = Utils.addWithoutDuplicates(ctx._offlineCollections[parentKey], model)
     deferred.resolve()
   else
     load(parentKey)
@@ -175,9 +179,14 @@ updateCache = (ctx, model) ->
     return deferred.reject()
 
   if Utils.isModel(model) and model.isNew()
-    Utils.addWithoutDuplicates(ctx.offlineModels, model)
+    ctx._offlineModels = Utils.addWithoutDuplicates(ctx._offlineModels, model)
     deferred.resolve()
   else
+    # DEBUG
+    if Utils.isCollection(model)
+      _.map(value, (element) -> console.warn('New model in cache !') if not element.id?)
+
+
     Utils.store.setItem(model.getKey(), {"value" : value, "expirationDate": expiredDate})
     .then(
       ->
@@ -205,8 +214,8 @@ serverWrite = (ctx, method, model, options, deferred ) ->
       deferred.reject.apply this, arguments
   .fail ->
     console.log "fail"
-    deferred.reject.apply this, arguments
     model.unsync()
+    deferred.reject.apply this, arguments
     Utils.store.removeItem(model.getKey())
 
 
@@ -224,9 +233,9 @@ wrapPromise = (ctx, promise) ->
   return deferred
 
 removePendingModel = (ctx, model) ->
-  ctx._offlineModels = _.filter(ctx._offlineModels, (m) -> not m.equals(model))
-  key = model.getKey()
-  ctx._offlineCollections[key] = _.filter(ctx._offlineCollections[key], (m) -> not m.equals(model))
+  ctx._offlineModels = _.filter(ctx._offlineModels, (m) -> m.get('_pending_id') isnt model.get('_pending_id'))
+  key = model.getParentKey()
+  ctx._offlineCollections[key] = _.filter(ctx._offlineCollections[key], (m) -> m.get('_pending_id') isnt model.get('_pending_id'))
 
 
 
@@ -272,7 +281,11 @@ module.exports = class Mnemosyne
 
       onPending   : (model) ->
         # Add the model to offline models
-        Utils.addWithoutDuplicates(_context.offlineModels, model)
+        _context._offlineModels = Utils.addWithoutDuplicates(_context._offlineModels, model)
+
+        #Add the model to offline parent collection
+        if model.getParentKey()?
+          _context._offlineCollections[model.getParentKey()] = Utils.addWithoutDuplicates(_context._offlineCollections[model.getParentKey()], model)
         model.pendingSync()
         console.log 'pending'
 
@@ -332,7 +345,7 @@ module.exports = class Mnemosyne
 
 
   clear: ->
-    _context._offlineCollections = []
+    _context._offlineCollections = {}
     _context._offlineModels = []
     _context._requestManager.clear()
 
@@ -355,17 +368,29 @@ module.exports = class Mnemosyne
         .done (value) ->
           #Let's see if there are some pending models to prepend to the collection
           if Utils.isCollection(model)
-            models = _context._offlineCollections[model.getKey()]
-            for offlineModel in models
-              value.unshift(offlineModel)
+            collection = model
+            models = _context._offlineCollections[collection.getKey()]
+            if models?
+              for offlineModel in models
+                value.unshift(offlineModel.attributes)
+          options.success?(value, 'success', null)
           deferred.resolve(value)
         .fail ->
+          if Utils.isCollection(model)
+            value = []
+            collection = model
+            models = _context._offlineCollections[collection.getKey()]
+            if models?
+              for offlineModel in models
+                value.unshift(offlineModel.attributes)
+            options.success?(value, 'success', null)
           deferred.reject.apply this, arguments
       when 'delete'
         model.on 'synced', ->
           # Remove the model from offline models and collection
           removePendingModel(_context, model)
           removeFromParentCache(_context, model)
+
         serverWrite(_context, method, model, options, deferred)
       else
         serverWrite(_context, method, model, options, deferred)
@@ -379,11 +404,6 @@ class MnemosyneModel
 
   getPendingId: ->
     return @get('_pending_id')
-
-  equals: (model) ->
-    # DEBUG
-    console.warn "equals: undefined pending id" if not @get('_pending_id')
-    return @get('_pending_id') is model.get('_pending_id')
 
   sync: -> Mnemosyne.prototype.sync.apply this, arguments
 

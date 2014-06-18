@@ -14,11 +14,11 @@ module.exports = class Utils
     return model instanceof Backbone.Model
 
 
-  # The model has to implements "equals" method
   @addWithoutDuplicates = (array, model) ->
-    return if not model? or typeof model.equals isnt "function"
-    array = _.filter(array, (m) -> not model.equals(m))
+    return if not model?
+    array = _.filter(array, (m) -> model.get('_pending_id') isnt m.get('_pending_id'))
     array.unshift(model)
+    return array
 
   # Mock localForage
   @store = {}
