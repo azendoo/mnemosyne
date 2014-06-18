@@ -45,16 +45,16 @@ pushRequest = (ctx, request) ->
     removeMethod(request, method)
     if isRequestEmpty(request)
       ctx.pendingRequests.retrieveItem(request.key)
-      deferred.resolve.apply(this, arguments)
       ctx.callbacks.onSynced(request.model)
+      deferred.resolve.apply(this, arguments)
 
   .fail (error) ->
     console.log '[pushRequest] -- Sync failed'
 
     # Attach a pending id
     request.model.attributes._pending_id = new Date().getTime()
-    deferred.resolve(request.model.attributes)
     ctx.callbacks.onPending(request.model)
+    deferred.resolve(request.model.attributes)
     if (not ctx.timeout?)
       consume(ctx)
 
@@ -91,8 +91,8 @@ consume = (ctx) ->
     removeMethod(request, method)
     if isRequestEmpty(request)
       ctx.pendingRequests.retrieveHead()
-      deferred.resolve.apply(this, arguments)
       ctx.callbacks.onSynced(request.model)
+
 
     ctx.interval = MIN_INTERVAL
 

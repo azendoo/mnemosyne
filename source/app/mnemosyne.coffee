@@ -95,6 +95,34 @@ load = (key) ->
   return deferred
 
 
+
+removeFromParentCache = (ctx, model) ->
+  deferred = $.Deferred()
+
+  # DEBUG
+  if Utils.isCollection(model)
+    console.warn 'removeParentFromCache: collection as argument !'
+    return deferred.resolve()
+
+  if model.isNew()
+    console.warn 'removeParentFromCache: model is new !'
+    return deferred.resolve()
+
+  parentKey = model.getParentKey()
+
+  load(parentKey)
+  .done (item) ->
+    models = item.value
+    models = _.filter(models, (m) -> m.id isnt model.get('id'))
+    Utils.store.setItem(parentKey, {"value" : models, "expirationDate" : item.expirationDate})
+    .always ->
+      deferred.resolve()
+  .fail ->
+    # The model doesn't exist
+    deferred.resolve()
+
+  return deferred
+
 updateParentCache = (ctx, model) ->
   deferred = $.Deferred()
 
@@ -170,11 +198,6 @@ serverWrite = (ctx, method, model, options, deferred ) ->
 
   updateCache(ctx, model)
   .done ->
-    # register event to trigger the cache update
-    model.off('mnemosyne:writeCache')
-    # Update the cached value of the model !! check if its still new !
-    # if there is an id into attributes, remove from pending models and add it to cache !!!!!!!!
-    model.on('mnemosyne:writeCache', -> updateCache(ctx, model))
     ctx._requestManager.safeSync(method, model, options)
     .done (value)->
       deferred.resolve.apply this, arguments
@@ -245,11 +268,15 @@ module.exports = class Mnemosyne
           # Remove the model from offline models and collection
           removePendingModel(_context, model)
         model.finishSync()
+        console.log 'synced'
 
       onPending   : (model) ->
         # Add the model to offline models
         Utils.addWithoutDuplicates(_context.offlineModels, model)
         model.pendingSync()
+        console.log 'pending'
+
+
       onCancelled : (model) ->
         if Utils.isModel(model)
           # DEBUG
@@ -261,6 +288,8 @@ module.exports = class Mnemosyne
           else
             console.log "TODO rollback"
         model.unsync()
+        console.log 'unsynced'
+
 
     _context = @
 
@@ -332,6 +361,12 @@ module.exports = class Mnemosyne
           deferred.resolve(value)
         .fail ->
           deferred.reject.apply this, arguments
+      when 'delete'
+        model.on 'synced', ->
+          # Remove the model from offline models and collection
+          removePendingModel(_context, model)
+          removeFromParentCache(_context, model)
+        serverWrite(_context, method, model, options, deferred)
       else
         serverWrite(_context, method, model, options, deferred)
 
@@ -351,13 +386,6 @@ class MnemosyneModel
     return @get('_pending_id') is model.get('_pending_id')
 
   sync: -> Mnemosyne.prototype.sync.apply this, arguments
-
-  destroy: ->
-    if @isNew()
-      @cancelPendingRequest(@getKey())
-    else
-      super
-
 
 class MnemosyneCollection
   sync: -> Mnemosyne.prototype.sync.apply this, arguments

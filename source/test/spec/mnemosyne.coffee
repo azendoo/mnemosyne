@@ -44,15 +44,16 @@ module.exports = describe 'Mnemosyne specifications', ->
 
 
   beforeEach ->
+    localStorage.clear()
     mnemosyne = null
     mnemosyne = new Mnemosyne()
     serverSpy = sinon.spy()
     server = sinon.fakeServer.create()
     model = new CustomModel(id:1)
     model2 = new CustomModel(id:2)
-
-
+    newModel = new CustomModel()
     collection = new CustomCollection()
+
 
   afterEach ->
     server.restore()
@@ -70,6 +71,37 @@ module.exports = describe 'Mnemosyne specifications', ->
   describe 'Online', ->
     beforeEach ->
       serverAutoRespondOk()
+
+    describe 'Cache invalidation', ->
+
+      it 'should create the collection cache', (done) ->
+        mnemosyne.cacheRead(collection.getKey()).fail (value) ->
+          model.fetch().done ->
+            mnemosyne.cacheRead(collection.getKey()).done (value)->
+              expect(value.length).equals(1)
+              done()
+
+      it 'should update the collection cache', (done) ->
+        model.setTime(0)
+        collection.push(model)
+        mnemosyne.cacheWrite(collection).done ->
+          mnemosyne.cacheRead(collection.getKey()).done (value) ->
+            expect(value[0].time).equals(0)
+            model.fetch().done ->
+              mnemosyne.cacheRead(collection.getKey()).done (value) ->
+                expect(value[0].time).not.equals(0)
+                done()
+
+      it 'should remove the model from the collection cache when model is destroyed', (done) ->
+        model.setTime(0)
+        collection.push(model)
+        mnemosyne.cacheWrite(collection).done ->
+          mnemosyne.cacheRead(collection.getKey()).done (value) ->
+            expect(value[0].time).equals(0)
+            model.destroy().done ->
+              mnemosyne.cacheRead(collection.getKey()).done (value) ->
+                expect(value).to.be.empty
+                done()
 
     describe 'Read value', ->
       it 'should trigger "syncing" event on model', (done) ->
@@ -283,6 +315,27 @@ module.exports = describe 'Mnemosyne specifications', ->
   describe 'Offline', ->
     beforeEach ->
       serverAutoRespondError()
+
+    describe 'Cache invalidation', ->
+
+      it 'should remove the model from the pendings models', (done) ->
+        expect(mnemosyne._offlineModels).to.be.empty
+        pending = false
+        newModel.on 'pending', ->
+          expect(mnemosyne._offlineModels).not.be.empty
+          pending = true
+          serverAutoRespondOk()
+
+        newModel.on 'synced', ->
+          expect(mnemosyne._offlineModels).to.be.empty
+          done()
+
+        newModel.setTime(17)
+        newModel.save()
+
+      # TODO
+      it 'should add the new model to pendings models when'
+
 
     it 'should trigger "syncing" event on model', (done) ->
       model.on 'syncing', -> done()
