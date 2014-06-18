@@ -260,7 +260,7 @@ module.exports = class Mnemosyne
   _offlineCollections: {}
 
   # Contains all offlines models
-  _offlineModels: {}
+  _offlineModels: []
 
   _context = null
   constructor: ->
@@ -386,12 +386,13 @@ module.exports = class Mnemosyne
             options.success?(value, 'success', null)
           deferred.reject.apply this, arguments
       when 'delete'
-        model.on 'synced', ->
-          # Remove the model from offline models and collection
+        _context._requestManager.safeSync(method, model, options)
+        .done (value)->
           removePendingModel(_context, model)
           removeFromParentCache(_context, model)
-
-        serverWrite(_context, method, model, options, deferred)
+          deferred.resolve.apply this, arguments
+        .fail ->
+          deferred.reject.apply this, arguments
       else
         serverWrite(_context, method, model, options, deferred)
 
