@@ -19,9 +19,9 @@ read = (ctx, model, options) ->
 
   console.log "Try loading value from cache"
   load(model.getKey())
-  .done (item) ->
+  .done (value) ->
     console.log "Succeed to read from cache"
-    cacheRead(ctx, model, options, item, deferred)
+    cacheRead(ctx, model, options, value, deferred)
   .fail ->
     console.log "Fail to read from cache"
     serverRead(ctx, model, options, null, deferred)
@@ -29,23 +29,21 @@ read = (ctx, model, options) ->
   return deferred
 
 
-cacheRead = (ctx, model, options, item, deferred) ->
+cacheRead = (ctx, model, options, value, deferred) ->
   # -- Cache expired
 
   # DEBUG
   if Utils.isCollection(model)
-    _.map(item.value, (element) -> console.warn('New model read in cache !') if not element.id?)
+    _.map(value.data, (element) -> console.warn('New model read in cache !') if not element.id?)
 
-  if options.forceRefresh or item.expirationDate < new Date().getTime()
+  if options.forceRefresh or value.expirationDate < new Date().getTime()
     console.log "-- cache expired"
-    serverRead(ctx, model, options, item, deferred)
+    serverRead(ctx, model, options, value, deferred)
 
   # -- Cache valid
   else
     console.log "-- cache valid"
-    options.success?(item.value, 'success', null)
-    deferred?.resolve(item.value)
-    model.finishSync()
+    deferred?.resolve(value.data)
 
 
 serverRead = (ctx, model, options, fallbackItem, deferred) ->
@@ -53,13 +51,10 @@ serverRead = (ctx, model, options, fallbackItem, deferred) ->
 
   # Return cache data and update silently the cache
   if fallbackItem? and model.cache.allowExpiredCache and not options.forceRefresh
-    # options.success?(fallbackItem.value, 'success', null)
-    deferred.resolve(fallbackItem.value)
-    model.finishSync()
+    deferred.resolve(fallbackItem.data)
     options.silent = true
 
   if not Utils.isConnected()
-    model.finishSync()
     console.log 'No connection'
     if Utils.isCollection(model)
       return deferred.resolve([])
@@ -67,19 +62,16 @@ serverRead = (ctx, model, options, fallbackItem, deferred) ->
       return deferred.reject()
 
   Backbone.sync('read', model, options)
-  .done ->
+  .done (value)->
     console.log "Succeed sync from server"
-    model.attributes = arguments[0]
-    updateCache(ctx, model)
+    updateCache(ctx, model, value)
     .always ->
       if deferred.state() isnt "resolved"
-        model.finishSync()
-        deferred.resolve.apply(this, arguments)
+        deferred.resolve(value)
   .fail (error) ->
     console.log "Fail sync from server"
     if deferred.state() isnt "resolved"
       deferred.reject.apply(this, arguments)
-      model.unsync()
 
 
 load = (key) ->
@@ -87,11 +79,11 @@ load = (key) ->
 
   Utils.store.getItem(key)
   .then(
-    (item) ->
-      if _.isEmpty(item) or not item.value?
+    (value) ->
+      if _.isEmpty(value) or not value.data?
         deferred.reject()
       else
-        deferred.resolve(item)
+        deferred.resolve(value)
     ->
       deferred.reject()
     )
@@ -115,10 +107,10 @@ removeFromParentCache = (ctx, model) ->
   parentKey = model.getParentKey()
 
   load(parentKey)
-  .done (item) ->
-    models = item.value
+  .done (value) ->
+    models = value.data
     models = _.filter(models, (m) -> m.id isnt model.get('id'))
-    Utils.store.setItem(parentKey, {"value" : models, "expirationDate" : item.expirationDate})
+    Utils.store.setItem(parentKey, {"data" : models, "expirationDate" : value.expirationDate})
     .always ->
       deferred.resolve()
   .fail ->
@@ -143,51 +135,48 @@ updateParentCache = (ctx, model) ->
     deferred.resolve()
   else
     load(parentKey)
-    .done (item) ->
-      models = item.value
+    .done (value) ->
+      models = value.data
       parentModel = _.findWhere(models, "id": model.get('id'))
       if parentModel?
         _.extend(parentModel, model.attributes)
       else
         models.unshift(model.attributes)
-      Utils.store.setItem(parentKey, {"value" : models, "expirationDate": 0})
+      Utils.store.setItem(parentKey, {"data" : models, "expirationDate": 0})
       .always ->
         deferred.resolve()
     .fail ->
       # Create the collection in cache
-      Utils.store.setItem(parentKey, {"value" : [model], "expirationDate": 0})
+      Utils.store.setItem(parentKey, {"data" : [model], "expirationDate": 0})
       deferred.resolve()
 
   return deferred
 
 
-updateCache = (ctx, model) ->
+updateCache = (ctx, model, data) ->
   deferred = $.Deferred()
+  return deferred.resolve() if not model.cache.enabled
 
   expiredDate = (new Date()).getTime() + model.cache.ttl * 1000
   console.log "Try to write cache -- expires at #{expiredDate}"
 
-  value = null
-  # if model instanceof Backbone.Model
-  if not model.models?
-    value = model.attributes
-  # else if model instanceof Backbone.Collection
-   else if model.models?
-    value = _.map(model.models, (m) -> m.attributes)
-  else
-    console.warn "Wrong instance for ", model
-    return deferred.reject()
-
-  if Utils.isModel(model) and model.isNew()
+  if model instanceof Backbone.Model and model.isNew()
     ctx._offlineModels = Utils.addWithoutDuplicates(ctx._offlineModels, model)
     deferred.resolve()
   else
-    # DEBUG
-    if Utils.isCollection(model)
-      _.map(value, (element) -> console.warn('New model in cache !') if not element.id?)
+    if model instanceof Backbone.Model
+      data ?= model.attributes
 
+    else if model instanceof Backbone.Collection
+      data ?= _.map(model.models, (m) -> m.attributes)
+      # DEBUG
+      _.map(data, (element) -> console.warn('New model in cache !') if not element.id?)
 
-    Utils.store.setItem(model.getKey(), {"value" : value, "expirationDate": expiredDate})
+    else
+      console.warn "Wrong instance for ", model
+      return deferred.reject()
+
+    Utils.store.setItem(model.getKey(), {"data" : data, "expirationDate": expiredDate})
     .then(
       ->
         console.log "Succeed cache write"
@@ -207,7 +196,7 @@ serverWrite = (ctx, method, model, options, deferred ) ->
 
   updateCache(ctx, model)
   .done ->
-    ctx._requestManager.safeSync(method, model, options)
+    ctx._requestManager.sync(method, model, options)
     .done (value)->
       deferred.resolve.apply this, arguments
     .fail ->
@@ -218,19 +207,6 @@ serverWrite = (ctx, method, model, options, deferred ) ->
     deferred.reject.apply this, arguments
     Utils.store.removeItem(model.getKey())
 
-
-###
-  Wrap promise using jQuery Deferred
-###
-wrapPromise = (ctx, promise) ->
-  deferred = $.Deferred()
-  promise.then(
-    ->
-      deferred.resolve()
-    ->
-      deferred.reject()
-    )
-  return deferred
 
 removePendingModel = (ctx, model) ->
   ctx._offlineModels = _.filter(ctx._offlineModels, (m) -> m.get('_pending_id') isnt model.get('_pending_id'))
@@ -281,11 +257,12 @@ module.exports = class Mnemosyne
 
       onPending   : (model) ->
         # Add the model to offline models
-        _context._offlineModels = Utils.addWithoutDuplicates(_context._offlineModels, model)
+        if model.isNew()
+          _context._offlineModels = Utils.addWithoutDuplicates(_context._offlineModels, model)
 
-        #Add the model to offline parent collection
-        if model.getParentKey()?
-          _context._offlineCollections[model.getParentKey()] = Utils.addWithoutDuplicates(_context._offlineCollections[model.getParentKey()], model)
+          #Add the model to offline parent collection
+          if model.getParentKey()?
+            _context._offlineCollections[model.getParentKey()] = Utils.addWithoutDuplicates(_context._offlineCollections[model.getParentKey()], model)
         model.pendingSync()
         console.log 'pending'
 
@@ -312,12 +289,15 @@ module.exports = class Mnemosyne
     updateCache(_context, model)
 
 
-  cacheRead  : (key) ->
+  cacheRead  : (model) ->
     deferred = $.Deferred()
-    Utils.store.getItem(key)
-    .done (item) ->
-      deferred.resolve(item.value)
+    return deferred.reject() if typeof model.getKey isnt 'function'
+    load(model.getKey())
+    .done (value) -> deferred.resolve(value.data)
     .fail -> deferred.reject()
+
+    return deferred
+
 
     return deferred
 
@@ -365,29 +345,36 @@ module.exports = class Mnemosyne
     switch method
       when 'read'
         read(_context, model, options)
-        .done (value) ->
+        .done (data) ->
+          data ?= []
           #Let's see if there are some pending models to prepend to the collection
           if Utils.isCollection(model)
             collection = model
             models = _context._offlineCollections[collection.getKey()]
             if models?
               for offlineModel in models
-                value.unshift(offlineModel.attributes)
-          options.success?(value, 'success', null)
-          deferred.resolve(value)
+                data.unshift(offlineModel.attributes)
+          options.success?(data, 'success', null)
+          deferred.resolve(data)
+          model.finishSync()
         .fail ->
           if Utils.isCollection(model)
-            value = []
+            data = []
             collection = model
             models = _context._offlineCollections[collection.getKey()]
             if models?
               for offlineModel in models
-                value.unshift(offlineModel.attributes)
-            options.success?(value, 'success', null)
+                data.unshift(offlineModel.attributes)
+              options.success?(data, 'success', null)
+              deferred.resolve(data)
+              model.finishSync()
+              return
+
           deferred.reject.apply this, arguments
+          model.unsync()
       when 'delete'
-        _context._requestManager.safeSync(method, model, options)
-        .done (value)->
+        _context._requestManager.sync(method, model, options)
+        .done (data)->
           removePendingModel(_context, model)
           removeFromParentCache(_context, model)
           deferred.resolve.apply this, arguments

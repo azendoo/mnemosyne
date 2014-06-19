@@ -6,7 +6,7 @@ Utils      = require "../app/utils"
 # _        = require "underscore"
 
 
-MAX_INTERVAL= 64000 # 64 seconds
+MAX_INTERVAL= 2000# 64 seconds
 MIN_INTERVAL= 250   # 250ms
 
 
@@ -30,6 +30,11 @@ pushRequest = (ctx, request) ->
     console.warn "[pushRequest] -- pendingId already set!!"
 
   if (not Utils.isConnected())
+    if not request.model.cache.enabled
+      console.log '[pushRequest] -- not connected. Not queued because of cache disabled'
+      ctx.callbacks.onCancelled(request.model)
+      return deferred.reject()
+
     console.log '[pushRequest] -- not connected. Push request in queue'
     request.model.attributes['_pending_id'] = new Date().getTime()
     ctx.callbacks.onPending(request.model)
@@ -51,6 +56,10 @@ pushRequest = (ctx, request) ->
 
   .fail (error) ->
     console.log '[pushRequest] -- Sync failed'
+    if not request.model.cache.enabled
+      console.log '[pushRequest] -- sync fail. Not queued because of cache disabled'
+      ctx.callbacks.onCancelled(request.model)
+      return deferred.reject()
 
     # Attach a pending id
     request.model.attributes['_pending_id'] = new Date().getTime()
@@ -187,7 +196,7 @@ module.exports = class RequestManager
     @callbacks.onCancelled(request.model)
 
 
-  safeSync: (method, model, options = {}) ->
+  sync: (method, model, options = {}) ->
     # Is there allready some pending request for this model?
     request = @pendingRequests.getItem(model.getKey())
     request ?= {}

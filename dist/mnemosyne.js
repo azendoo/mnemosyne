@@ -789,7 +789,7 @@ module.exports = Mnemosyne = (function() {
 
   Mnemosyne.prototype._offlineCollections = {};
 
-  Mnemosyne.prototype._offlineModels = {};
+  Mnemosyne.prototype._offlineModels = [];
 
   _context = null;
 
@@ -807,9 +807,11 @@ module.exports = Mnemosyne = (function() {
         return console.log('synced');
       },
       onPending: function(model) {
-        _context._offlineModels = Utils.addWithoutDuplicates(_context._offlineModels, model);
-        if (model.getParentKey() != null) {
-          _context._offlineCollections[model.getParentKey()] = Utils.addWithoutDuplicates(_context._offlineCollections[model.getParentKey()], model);
+        if (model.isNew()) {
+          _context._offlineModels = Utils.addWithoutDuplicates(_context._offlineModels, model);
+          if (model.getParentKey() != null) {
+            _context._offlineCollections[model.getParentKey()] = Utils.addWithoutDuplicates(_context._offlineCollections[model.getParentKey()], model);
+          }
         }
         model.pendingSync();
         return console.log('pending');
@@ -896,6 +898,9 @@ module.exports = Mnemosyne = (function() {
       case 'read':
         read(_context, model, options).done(function(value) {
           var collection, models, offlineModel, _i, _len;
+          if (value == null) {
+            value = [];
+          }
           if (Utils.isCollection(model)) {
             collection = model;
             models = _context._offlineCollections[collection.getKey()];
@@ -930,11 +935,13 @@ module.exports = Mnemosyne = (function() {
         });
         break;
       case 'delete':
-        model.on('synced', function() {
+        _context._requestManager.safeSync(method, model, options).done(function(value) {
           removePendingModel(_context, model);
-          return removeFromParentCache(_context, model);
+          removeFromParentCache(_context, model);
+          return deferred.resolve.apply(this, arguments);
+        }).fail(function() {
+          return deferred.reject.apply(this, arguments);
         });
-        serverWrite(_context, method, model, options, deferred);
         break;
       default:
         serverWrite(_context, method, model, options, deferred);

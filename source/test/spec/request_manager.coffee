@@ -5,6 +5,8 @@ module.exports = describe 'Request Manager specifications', ->
   model1 = null
   model2 = null
   model3 = null
+  serverSpy = null
+
 
   RequestManager = require '../../app/request_manager'
   Backbone       = require 'backbone'
@@ -12,6 +14,7 @@ module.exports = describe 'Request Manager specifications', ->
 
   setUpServerResponse = (statusCode=200) ->
       server.respondWith (xhr) ->
+        serverSpy.call()
         xhr.respond(
           statusCode
           "Content-Type": "application/json"
@@ -19,6 +22,7 @@ module.exports = describe 'Request Manager specifications', ->
         )
 
   beforeEach ->
+    serverSpy = sinon.spy()
     requestManager = new RequestManager
       onSynced    : (model) -> model.finishSync()
       onPending   : (model) -> model.pendingSync()
@@ -26,6 +30,9 @@ module.exports = describe 'Request Manager specifications', ->
     requestManager.clear()
 
     class CustomModel extends Backbone.Model
+      cache:
+        enabled: true
+
       constructor: ->
         super
         @setTime(new Date().getTime())
@@ -41,6 +48,7 @@ module.exports = describe 'Request Manager specifications', ->
 
   afterEach ->
     server.restore()
+    requestManager.clear()
 
 
 
@@ -57,7 +65,7 @@ module.exports = describe 'Request Manager specifications', ->
       expect(requestManager.timeout).to.not.exist
 
       serverAutoRespondError()
-      requestManager.safeSync('create', model1)
+      requestManager.sync('create', model1)
       .always ->
         requestManager.clear()
         expect(requestManager.timeout).to.not.exist
@@ -67,7 +75,7 @@ module.exports = describe 'Request Manager specifications', ->
       expect(requestManager.interval).to.equal(250)
 
       serverAutoRespondError()
-      requestManager.safeSync('create', model1)
+      requestManager.sync('create', model1)
       .always ->
         setTimeout((->
           expect(requestManager.interval).to.be.above(400)
@@ -75,112 +83,187 @@ module.exports = describe 'Request Manager specifications', ->
           expect(requestManager.interval).to.equal(250)
           done()),250)
 
-
-  describe 'Spec safeSync', ->
-    it 'should resolve the promise if the request succeed on the first try', (done) ->
+  ###
+              +++++ ONLINE +++++
+  ###
+  describe 'Online', ->
+    beforeEach ->
       serverAutoRespondOk()
-      deferred = requestManager.safeSync('create', model1)
-      deferred.always ->
-        expect(deferred.state()).to.be.equal("resolved")
-        done()
 
-    it 'should trigger "synced" event on model if the request succeed on the first try', (done) ->
-      serverAutoRespondOk()
-      model1.on "synced", -> done()
-      requestManager.safeSync('update', model1)
+    ###
+                ONLINE - CACHE enabled
+    ###
+    describe 'Cache enabled', ->
+      beforeEach ->
+        model1.cache = {enabled : true}
 
-    it 'should trigger "pending" event on model if the request fail and is pushed in queue', (done) ->
-      model1.on "pending", -> done()
+      it 'should resolve the promise', (done) ->
+        deferred = requestManager.sync('create', model1)
+        deferred.always ->
+          expect(serverSpy).to.have.been.calledOnce
+          expect(deferred.state()).to.be.equal("resolved")
+          done()
+
+      it 'should trigger "synced" event on model', (done) ->
+        model1.on "synced", -> done()
+        requestManager.sync('update', model1)
+
+    ###
+                ONLINE - CACHE disabled
+    ###
+    describe 'Cache disabled', ->
+      beforeEach ->
+        model1.cache = {enabled : false}
+
+      it 'should resolve the promise', (done) ->
+        deferred = requestManager.sync('create', model1)
+        deferred.always ->
+          expect(serverSpy).to.have.been.calledOnce
+          expect(deferred.state()).to.be.equal("resolved")
+          done()
+
+      it 'should trigger "synced" event on model', (done) ->
+        model1.on "synced", -> done()
+        requestManager.sync('update', model1)
+
+  ###
+              +++++ OFFLINE +++++
+  ###
+  describe 'Offline', ->
+    beforeEach ->
       serverAutoRespondError()
-      requestManager.safeSync('update', model1)
+    ###
+                OFFLINE - CACHE enabled
+    ###
+    describe 'Cache enabled', ->
+      beforeEach ->
+        model1.cache = {enabled : true}
 
-    it 'should trigger "synced" after a "pending" event on model when the request succeed'
+      it 'should resolve the promise', (done) ->
+        deferred = requestManager.sync('create', model1)
+        deferred.always ->
+          expect(deferred.state()).to.be.equal("resolved")
+          done()
 
+      it 'should trigger "pending" event on model', (done) ->
+        model1.on "pending", -> done()
+        requestManager.sync('update', model1)
 
-  describe 'Spec getPendingRequests', ->
-    it 'should return all pending requests', (done) ->
-      nbPendingRequests = requestManager.getPendingRequests().length
-      expect(nbPendingRequests).to.be.equal(0)
+      it 'should trigger "pending" event on model if the request fail and is pushed in queue', (done) ->
+        model1.on "pending", -> done()
+        requestManager.sync('update', model1)
 
-      serverAutoRespondError()
+      describe 'Spec getPendingRequests', ->
+        it 'should return all pending requests', (done) ->
+          nbPendingRequests = requestManager.getPendingRequests().length
+          expect(nbPendingRequests).to.be.equal(0)
 
-      $.when(
-        requestManager.safeSync('update', model1),
-        requestManager.safeSync('update', model2),
-        requestManager.safeSync('update', model3),
-        requestManager.safeSync('update', model3) # duplicate
-      ).done ->
-        nbPendingRequests = requestManager.getPendingRequests().length
-        expect(nbPendingRequests).to.be.equal(3)
-        done()
+          serverAutoRespondError()
 
-
-  describe 'Spec cancel request', ->
-    it 'should cancel the pending request', (done) ->
-      nbPendingRequests = requestManager.getPendingRequests().length
-      expect(nbPendingRequests).to.be.equal(0)
-
-      serverAutoRespondError()
-      $.when(
-        requestManager.safeSync('update', model1),
-        requestManager.safeSync('update', model2),
-        requestManager.safeSync('update', model3),
-        requestManager.safeSync('update', model3) # duplicate
-      ).done ->
-        requestManager.cancelPendingRequest(model3.getKey())
-        nbPendingRequests = requestManager.getPendingRequests().length
-        expect(nbPendingRequests).to.be.equal(2)
-        done()
-
-    it 'should cancel all pending requests', (done) ->
-      nbPendingRequests = requestManager.getPendingRequests().length
-      expect(nbPendingRequests).to.be.equal(0)
-
-      serverAutoRespondError()
-      $.when(
-        requestManager.safeSync('update', model1),
-        requestManager.safeSync('update', model2),
-        requestManager.safeSync('update', model3),
-        requestManager.safeSync('update', model3) # duplicate
-      ).done ->
-        requestManager.cancelPendingRequest(model3.getKey())
-        nbPendingRequests = requestManager.getPendingRequests().length
-        expect(nbPendingRequests).to.be.equal(2)
-        done()
-
-    it 'should trigger "unsynced" on model when the request is cancelled', (done) ->
-      model1.on 'unsynced', -> done()
-      model1.on 'pending', -> requestManager.cancelPendingRequest(model1.getKey())
-      serverAutoRespondError()
-      requestManager.safeSync('update', model1)
+          $.when(
+            requestManager.sync('update', model1),
+            requestManager.sync('update', model2),
+            requestManager.sync('update', model3),
+            requestManager.sync('update', model3) # duplicate
+          ).done ->
+            nbPendingRequests = requestManager.getPendingRequests().length
+            expect(nbPendingRequests).to.be.equal(3)
+            done()
 
 
-  describe 'Spec retrySync', ->
-    it 'should reset the interval value to the min value'
+      describe 'Spec cancel request', ->
+        it 'should cancel the pending request', (done) ->
+          nbPendingRequests = requestManager.getPendingRequests().length
+          expect(nbPendingRequests).to.be.equal(0)
+
+          serverAutoRespondError()
+          $.when(
+            requestManager.sync('update', model1),
+            requestManager.sync('update', model2),
+            requestManager.sync('update', model3),
+            requestManager.sync('update', model3) # duplicate
+          ).done ->
+            requestManager.cancelPendingRequest(model3.getKey())
+            nbPendingRequests = requestManager.getPendingRequests().length
+            expect(nbPendingRequests).to.be.equal(2)
+            done()
+
+        it 'should cancel all pending requests', (done) ->
+          nbPendingRequests = requestManager.getPendingRequests().length
+          expect(nbPendingRequests).to.be.equal(0)
+
+          serverAutoRespondError()
+          $.when(
+            requestManager.sync('update', model1),
+            requestManager.sync('update', model2),
+            requestManager.sync('update', model3),
+            requestManager.sync('update', model3) # duplicate
+          ).done ->
+            requestManager.cancelPendingRequest(model3.getKey())
+            nbPendingRequests = requestManager.getPendingRequests().length
+            expect(nbPendingRequests).to.be.equal(2)
+            done()
+
+        it 'should trigger "unsynced" on model when the request is cancelled', (done) ->
+          model1.on 'unsynced', -> done()
+          model1.on 'pending', -> requestManager.cancelPendingRequest(model1.getKey())
+          serverAutoRespondError()
+          requestManager.sync('update', model1)
 
 
-  describe 'Spec smart request', ->
-    it 'should cancel the request if a destroy is pending after a create', (done) ->
-      serverAutoRespondError()
-      $.when(
-        requestManager.safeSync('create', model1),
-        requestManager.safeSync('update', model1),
-        requestManager.safeSync('delete', model1)
-      ).always ->
-        nbPendingRequests = requestManager.getPendingRequests().length
-        expect(nbPendingRequests).to.be.equal(0)
-        done()
+      describe 'Spec retrySync', ->
+        it 'should reset the interval value to the min value'
 
-    it 'should cancel the update request if a create request is pending', (done) ->
-      serverAutoRespondError()
-      $.when(
-        requestManager.safeSync('create', model1),
-        requestManager.safeSync('update', model1),
-      ).done ->
-        nbPendingRequests = requestManager.getPendingRequests().length
-        expect(nbPendingRequests).to.be.equal(1)
-        request = requestManager.getPendingRequests()[0]
-        expect(request.methods['update']).to.not.exist
-        done()
 
-    it 'should cancel the update request if a destroy request is pending'
+      describe 'Spec smart request', ->
+        beforeEach ->
+          serverAutoRespondError()
+
+        it 'should cancel the request if a destroy is pending after a create', (done) ->
+          $.when(
+            requestManager.sync('create', model1),
+            requestManager.sync('update', model1),
+            requestManager.sync('delete', model1)
+          ).always ->
+            nbPendingRequests = requestManager.getPendingRequests().length
+            expect(nbPendingRequests).to.be.equal(0)
+            done()
+
+        it 'should cancel the update request if a create request is pending', (done) ->
+          $.when(
+            requestManager.sync('create', model1),
+            requestManager.sync('update', model1),
+          ).done ->
+            nbPendingRequests = requestManager.getPendingRequests().length
+            expect(nbPendingRequests).to.be.equal(1)
+            request = requestManager.getPendingRequests()[0]
+            expect(request.methods['update']).to.not.exist
+            done()
+
+        it 'should cancel the update request if a destroy request is pending', (done) ->
+          $.when(
+            requestManager.sync('update', model1),
+            requestManager.sync('delete', model1)
+          ).always ->
+            methods = requestManager.getPendingRequests()[0].methods
+            expect(methods.update).to.not.exist
+            expect(methods.delete).to.exist
+            done()
+
+    ###
+                OFFLINE - CACHE disabled
+    ###
+    describe 'Cache disabled', ->
+      beforeEach ->
+        model1.cache = {enabled : false}
+
+      it 'should reject the promise', (done) ->
+        deferred = requestManager.sync('create', model1)
+        deferred.always ->
+          expect(serverSpy).to.not.have.been.called
+          expect(deferred.state()).to.be.equal("rejected")
+          done()
+
+      it 'should trigger "unsynced" event on model', (done) ->
+        model1.on "unsynced", -> done()
+        requestManager.sync('update', model1)
