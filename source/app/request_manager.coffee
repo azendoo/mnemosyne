@@ -6,8 +6,8 @@ Utils      = require "../app/utils"
 # _        = require "underscore"
 
 
-MAX_INTERVAL= 2000# 64 seconds
-MIN_INTERVAL= 250   # 250ms
+MAX_INTERVAL= 2000  # 64 seconds
+MIN_INTERVAL= 125   # 125ms
 
 
 resetTimer = (ctx) ->
@@ -45,13 +45,13 @@ pushRequest = (ctx, request) ->
   console.log '[pushRequest] -- Try sync'
 
   Backbone.sync(method, request.model, options)
-  .done ->
+  .done (value)->
     console.log '[pushRequest] -- Sync success'
 
     removeMethod(request, method)
     if isRequestEmpty(request)
       ctx.pendingRequests.retrieveItem(request.key)
-      ctx.callbacks.onSynced(request.model)
+      ctx.callbacks.onSynced(request.model, value, method)
       deferred.resolve.apply(this, arguments)
 
   .fail (error) ->
@@ -95,17 +95,16 @@ consume = (ctx) ->
   console.log '[consume] -- try sync ', method
 
   Backbone.sync(method, request.model, options)
-  .done ->
+  .done (value) ->
     console.log '[consume] -- Sync success'
     request.model.attributes._pending_id = pendingId
     removeMethod(request, method)
     if isRequestEmpty(request)
       ctx.pendingRequests.retrieveHead()
-      ctx.callbacks.onSynced(request.model)
+      ctx.callbacks.onSynced(request.model, value, method)
 
 
     ctx.interval = MIN_INTERVAL
-
   .fail (error) ->
     console.log '[consume] -- Sync failed', error
 

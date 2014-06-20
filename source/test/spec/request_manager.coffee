@@ -72,15 +72,15 @@ module.exports = describe 'Request Manager specifications', ->
         done()
 
     it 'should reset the time interval when the queue is empty', (done) ->
-      expect(requestManager.interval).to.equal(250)
+      expect(requestManager.interval).to.equal(125)
 
       serverAutoRespondError()
       requestManager.sync('create', model1)
       .always ->
         setTimeout((->
-          expect(requestManager.interval).to.be.above(400)
+          expect(requestManager.interval).to.be.above(125)
           requestManager.clear()
-          expect(requestManager.interval).to.equal(250)
+          expect(requestManager.interval).to.equal(125)
           done()),250)
 
   ###

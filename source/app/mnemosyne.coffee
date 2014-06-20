@@ -34,7 +34,7 @@ cacheRead = (ctx, model, options, value, deferred) ->
 
   # DEBUG
   if Utils.isCollection(model)
-    _.map(value.data, (element) -> console.warn('New model read in cache !') if not element.id?)
+    _.map(model.parse(value.data), (element) -> console.warn('New model read in cache !') if not element.id?)
 
   if options.forceRefresh or value.expirationDate < new Date().getTime()
     console.log "-- cache expired"
@@ -119,6 +119,16 @@ removeFromParentCache = (ctx, model) ->
 
   return deferred
 
+
+removeFromCache = (ctx, model) ->
+  deferred = $.Deferred()
+
+  Utils.store.removeItem(model).always ->
+    removeFromParentCache(ctx, model).always -> deferred.resolve()
+
+  return deferred
+
+
 updateParentCache = (ctx, model) ->
   deferred = $.Deferred()
 
@@ -154,6 +164,7 @@ updateParentCache = (ctx, model) ->
 
 
 updateCache = (ctx, model, data) ->
+
   deferred = $.Deferred()
   return deferred.resolve() if not model.cache.enabled
 
@@ -170,7 +181,13 @@ updateCache = (ctx, model, data) ->
     else if model instanceof Backbone.Collection
       data ?= _.map(model.models, (m) -> m.attributes)
       # DEBUG
-      _.map(data, (element) -> console.warn('New model in cache !') if not element.id?)
+      _.map(model.parse(data), (element) ->
+        if not element.id?
+          console.warn('New model in cache !')
+          console.warn('\tmodel ',model)
+          console.warn('\tdata ',data)
+          console.warn('\telement ',element)
+          )
 
     else
       console.warn "Wrong instance for ", model
@@ -241,17 +258,15 @@ module.exports = class Mnemosyne
   _context = null
   constructor: ->
     @_requestManager = new RequestManager
-      onSynced    : (model) ->
-        if Utils.isModel(model)
-          # DEBUG
-          if model.isNew()
-            console.warn "Model has not been updated yet !"
+      onSynced  : (model, value, method) ->
+        if method is 'delete'
+          removeFromCache(_context, model)
+        else
+          #Update cache
+          updateCache(_context, model, value)
 
-          #Add model to parent collection cache
-          updateParentCache(_context, model)
-
-          # Remove the model from offline models and collection
-          removePendingModel(_context, model)
+        # Remove the model from offline models and collection
+        removePendingModel(_context, model)
         model.finishSync()
         console.log 'synced'
 
@@ -376,7 +391,7 @@ module.exports = class Mnemosyne
         _context._requestManager.sync(method, model, options)
         .done (data)->
           removePendingModel(_context, model)
-          removeFromParentCache(_context, model)
+          removeFromCache(_context, model)
           deferred.resolve.apply this, arguments
         .fail ->
           deferred.reject.apply this, arguments
