@@ -13,12 +13,12 @@ Utils          = require "../app/utils"
 read = (ctx, model, options) ->
   deferred = $.Deferred()
 
-  if not model.getKey?()? or not model.cache.enabled
+  if typeof model.getKey isnt 'function' or not model.cache.enabled
     console.log "Cache forbidden"
     return serverRead(ctx, model, options, null, deferred)
 
   console.log "Try loading value from cache"
-  load(model.getKey())
+  Utils.store.getItem(model.getKey())
   .done (value) ->
     console.log "Succeed to read from cache"
     cacheRead(ctx, model, options, value, deferred)
@@ -33,17 +33,17 @@ cacheRead = (ctx, model, options, value, deferred) ->
   # -- Cache expired
 
   # DEBUG
-  if Utils.isCollection(model)
+  if model instanceof Backbone.Collection
     _.map(model.parse(value.data), (element) -> console.warn('New model read in cache !') if not element.id?)
 
   if options.forceRefresh or value.expirationDate < new Date().getTime()
     console.log "-- cache expired"
-    serverRead(ctx, model, options, value, deferred)
+    serverRead(ctx, model, options, value.data, deferred)
 
   # -- Cache valid
   else
     console.log "-- cache valid"
-    deferred?.resolve(value.data)
+    deferred.resolve(value.data)
 
 
 serverRead = (ctx, model, options, fallbackItem, deferred) ->
@@ -51,12 +51,12 @@ serverRead = (ctx, model, options, fallbackItem, deferred) ->
 
   # Return cache data and update silently the cache
   if fallbackItem? and model.cache.allowExpiredCache and not options.forceRefresh
-    deferred.resolve(fallbackItem.data)
+    deferred.resolve(fallbackItem)
     options.silent = true
 
   if not Utils.isConnected()
     console.log 'No connection'
-    if Utils.isCollection(model)
+    if model instanceof Backbone.Collection
       return deferred.resolve([])
     else
       return deferred.reject()
@@ -74,48 +74,37 @@ serverRead = (ctx, model, options, fallbackItem, deferred) ->
       deferred.reject.apply(this, arguments)
 
 
-load = (key) ->
-  deferred = $.Deferred()
-
-  Utils.store.getItem(key)
-  .then(
-    (value) ->
-      if _.isEmpty(value) or not value.data?
-        deferred.reject()
-      else
-        deferred.resolve(value)
-    ->
-      deferred.reject()
-    )
-
-  return deferred
-
-
-
 removeFromParentCache = (ctx, model) ->
   deferred = $.Deferred()
 
   # DEBUG
-  if Utils.isCollection(model)
+  if model instanceof Backbone.Collection
     console.warn 'removeParentFromCache: collection as argument !'
     return deferred.resolve()
 
-  if model.isNew()
+  # DEBUG
+  if not model.get('id')?
     console.warn 'removeParentFromCache: model is new !'
     return deferred.resolve()
 
-  parentKey = model.getParentKey()
+  parentKeys = model.getParentKeys()
 
-  load(parentKey)
-  .done (value) ->
-    models = value.data
-    models = _.filter(models, (m) -> m.id isnt model.get('id'))
-    Utils.store.setItem(parentKey, {"data" : models, "expirationDate" : value.expirationDate})
-    .always ->
-      deferred.resolve()
-  .fail ->
-    # The model doesn't exist
-    deferred.resolve()
+  deferredArray = _.map(parentKeys, (parentKey)->
+    _deferred = $.Deferred()
+    Utils.store.getItem(parentKey)
+    .done (value) ->
+      models = value.data
+      models = _.filter(models, (m) -> m.id isnt model.get('id'))
+      Utils.store.setItem(parentKey, {"data" : models, "expirationDate" : value.expirationDate})
+      .always ->
+        _deferred.resolve()
+    .fail ->
+      # The model doesn't exist
+      _deferred.resolve()
+    )
+  $.when.apply($, deferredArray).then(
+    -> deferred.resolve()
+    -> deferred.reject())
 
   return deferred
 
@@ -133,32 +122,44 @@ updateParentCache = (ctx, model) ->
   deferred = $.Deferred()
 
   # return deferred.resolve()  if model instanceof Backbone.Collection
-  return deferred.resolve()  if Utils.isCollection(model) or typeof model.getParentKey isnt 'function'
-  parentKey = model.getParentKey()
-  console.log "Updating parent cache [#{parentKey}]"
+  return deferred.resolve()  if model instanceof Backbone.Collection or typeof model.getParentKeys isnt 'function'
+  parentKeys = model.getParentKeys()
 
-  # Don't update cache, just add/update pending models
-  if model.isNew()
-    # just add to unsynced models and collections
-    ctx._offlineCollections[parentKey] ?= []
-    ctx._offlineCollections[parentKey] = Utils.addWithoutDuplicates(ctx._offlineCollections[parentKey], model)
-    deferred.resolve()
-  else
-    load(parentKey)
-    .done (value) ->
-      models = value.data
-      parentModel = _.findWhere(models, "id": model.get('id'))
-      if parentModel?
-        _.extend(parentModel, model.attributes)
-      else
-        models.unshift(model.attributes)
-      Utils.store.setItem(parentKey, {"data" : models, "expirationDate": 0})
-      .always ->
-        deferred.resolve()
-    .fail ->
-      # Create the collection in cache
-      Utils.store.setItem(parentKey, {"data" : [model], "expirationDate": 0})
-      deferred.resolve()
+  deferredArray = _.map(parentKeys, (parentKey)->
+    _deferred = $.Deferred()
+    console.log "Updating parent cache [#{parentKey}]"
+    if not model.get('id')?
+      # just add to unsynced models and collections
+      ctx._offlineCollections[parentKey] ?= []
+      ctx._offlineCollections[parentKey] = Utils.addWithoutDuplicates(ctx._offlineCollections[parentKey], model)
+      console.debug 'model set'
+      _deferred.resolve()
+    else
+      Utils.store.getItem(parentKey)
+      .done (value) ->
+        models = value.data
+        parentModel = _.findWhere(models, "id": model.get('id'))
+        if parentModel?
+          _.extend(parentModel, model.attributes)
+        else
+          models.unshift(model.attributes)
+        Utils.store.setItem(parentKey, {"data" : models, "expirationDate": 0})
+        .always ->
+          _deferred.resolve()
+      .fail ->
+        # Create the collection in cache
+        Utils.store.setItem(parentKey, {"data" : [model], "expirationDate": 0})
+        .done ->
+          _deferred.resolve()
+        .fail ->
+          _deferred.reject()
+
+    return _deferred
+
+    )
+  $.when(deferredArray).then(
+    -> deferred.resolve()
+    -> deferred.reject())
 
   return deferred
 
@@ -171,7 +172,7 @@ updateCache = (ctx, model, data) ->
   expiredDate = (new Date()).getTime() + model.cache.ttl * 1000
   console.log "Try to write cache -- expires at #{expiredDate}"
 
-  if model instanceof Backbone.Model and model.isNew()
+  if model instanceof Backbone.Model and not model.get('id')?
     ctx._offlineModels = Utils.addWithoutDuplicates(ctx._offlineModels, model)
     deferred.resolve()
   else
@@ -194,16 +195,15 @@ updateCache = (ctx, model, data) ->
       return deferred.reject()
 
     Utils.store.setItem(model.getKey(), {"data" : data, "expirationDate": expiredDate})
-    .then(
-      ->
+    .done ->
         console.log "Succeed cache write"
         updateParentCache(ctx, model)
         .always ->
           deferred.resolve()
-      ->
+    .fail ->
         console.log "fail cache write"
         deferred.reject()
-    )
+
 
   return deferred
 
@@ -226,9 +226,13 @@ serverWrite = (ctx, method, model, options, deferred ) ->
 
 
 removePendingModel = (ctx, model) ->
+  return if not model instanceof Backbone.Model
   ctx._offlineModels = _.filter(ctx._offlineModels, (m) -> m.get('_pending_id') isnt model.get('_pending_id'))
-  key = model.getParentKey()
-  ctx._offlineCollections[key] = _.filter(ctx._offlineCollections[key], (m) -> m.get('_pending_id') isnt model.get('_pending_id'))
+  parentKeys = model.getParentKeys()
+  parentKeys ?= []
+  for key in parentKeys
+    ctx._offlineCollections[key] = _.filter(ctx._offlineCollections[key], (m) -> m.get('_pending_id') isnt model.get('_pending_id'))
+
 
 
 
@@ -259,10 +263,7 @@ module.exports = class Mnemosyne
   constructor: ->
     @_requestManager = new RequestManager
       onSynced  : (model, value, method) ->
-        if method is 'delete'
-          removeFromCache(_context, model)
-        else
-          #Update cache
+        if method isnt 'delete'
           updateCache(_context, model, value)
 
         # Remove the model from offline models and collection
@@ -272,20 +273,23 @@ module.exports = class Mnemosyne
 
       onPending   : (model) ->
         # Add the model to offline models
-        if model.isNew()
+        if not model.get('id')?
           _context._offlineModels = Utils.addWithoutDuplicates(_context._offlineModels, model)
 
           #Add the model to offline parent collection
-          if model.getParentKey()?
-            _context._offlineCollections[model.getParentKey()] = Utils.addWithoutDuplicates(_context._offlineCollections[model.getParentKey()], model)
+          if typeof model.getParentKeys is 'function'
+            parentKeys = model.getParentKeys()
+            parentKeys ?= []
+            for parentKey in parentKeys
+              _context._offlineCollections[parentKey] = Utils.addWithoutDuplicates(_context._offlineCollections[parentKey], model)
         model.pendingSync()
         console.log 'pending'
 
 
       onCancelled : (model) ->
-        if Utils.isModel(model)
+        if model instanceof Backbone.Model
           # DEBUG
-          if model.isNew()
+          if not model.get('id')?
             console.warn "Model has not been updated yet !"
 
             # Remove the model from offline models and collection
@@ -299,25 +303,30 @@ module.exports = class Mnemosyne
     _context = @
 
 
-  cacheWrite : (model) ->
-    model.cache = _.defaults(model.cache or {}, defaultCacheOptions)
-    updateCache(_context, model)
+  cacheWrite : (key, value) ->
+    if key instanceof Backbone.Model or key instanceof Backbone.Collection
+      model = key
+      model.cache = _.defaults(model.cache or {}, defaultCacheOptions)
+      return updateCache(_context, model)
+    return Utils.store.setItem(key, value)
 
 
-  cacheRead  : (model) ->
-    deferred = $.Deferred()
-    return deferred.reject() if typeof model.getKey isnt 'function'
-    load(model.getKey())
-    .done (value) -> deferred.resolve(value.data)
-    .fail -> deferred.reject()
-
-    return deferred
-
-
-    return deferred
+  cacheRead  : (key) ->
+    if key instanceof Backbone.Model or key instanceof Backbone.Collection
+      model = key
+      deferred = $.Deferred()
+      return deferred.reject() if typeof model.getKey isnt 'function'
+      Utils.store.getItem(model.getKey())
+      .done (value) -> deferred.resolve(value.data)
+      .fail -> deferred.reject()
+      return deferred
+    return Utils.store.getItem(key)
 
 
   cacheRemove: (key) ->
+    if key instanceof Backbone.Model or key instanceof Backbone.Collection
+      model = key
+      return removeFromCache(_context, model)
     return Utils.store.removeItem(key)
 
 
@@ -363,7 +372,7 @@ module.exports = class Mnemosyne
         .done (data) ->
           data ?= []
           #Let's see if there are some pending models to prepend to the collection
-          if Utils.isCollection(model)
+          if model instanceof Backbone.Collection
             collection = model
             models = _context._offlineCollections[collection.getKey()]
             if models?
@@ -373,7 +382,7 @@ module.exports = class Mnemosyne
           deferred.resolve(data)
           model.finishSync()
         .fail ->
-          if Utils.isCollection(model)
+          if model instanceof Backbone.Collection
             data = []
             collection = model
             models = _context._offlineCollections[collection.getKey()]
@@ -388,10 +397,10 @@ module.exports = class Mnemosyne
           deferred.reject.apply this, arguments
           model.unsync()
       when 'delete'
+        removePendingModel(_context, model)
+        removeFromCache(_context, model)
         _context._requestManager.sync(method, model, options)
         .done (data)->
-          removePendingModel(_context, model)
-          removeFromCache(_context, model)
           deferred.resolve.apply this, arguments
         .fail ->
           deferred.reject.apply this, arguments
@@ -413,6 +422,13 @@ class MnemosyneModel
 class MnemosyneCollection
   sync: -> Mnemosyne.prototype.sync.apply this, arguments
 
+_destroy = Backbone.Model.prototype.destroy
+Backbone.Model.prototype.destroy = ->
+  _isNew = this.isNew
+  this.isNew = -> false
+  ret = _destroy.apply this, arguments
+  this.isNew = _isNew
+  return ret
 
 _.extend Backbone.Model.prototype, SyncMachine
 _.extend Backbone.Model.prototype, MnemosyneModel.prototype

@@ -137,14 +137,6 @@ module.exports = Utils = (function() {
     return window.navigator.onLine;
   };
 
-  Utils.isCollection = function(model) {
-    return model instanceof Backbone.Collection;
-  };
-
-  Utils.isModel = function(model) {
-    return model instanceof Backbone.Model;
-  };
-
   Utils.addWithoutDuplicates = function(array, model) {
     if (model == null) {
       return;
@@ -207,9 +199,6 @@ resetTimer = function(ctx) {
 pushRequest = function(ctx, request) {
   var deferred, method, options, pendingId;
   deferred = $.Deferred();
-  if (request == null) {
-    return deferred.reject();
-  }
   ctx.pendingRequests.addTail(request.key, request);
   method = getMethod(request);
   options = request.methods[method];
@@ -387,10 +376,11 @@ module.exports = RequestManager = (function() {
   };
 
   RequestManager.prototype.sync = function(method, model, options) {
-    var request;
+    var deferred, request;
     if (options == null) {
       options = {};
     }
+    model.beginSync();
     request = this.pendingRequests.getItem(model.getKey());
     if (request == null) {
       request = {};
@@ -402,7 +392,12 @@ module.exports = RequestManager = (function() {
     request.methods[method] = options;
     request.key = model.getKey();
     request = smartRequest(this, request);
-    model.beginSync();
+    if (request == null) {
+      deferred = $.Deferred();
+      deferred.resolve();
+      this.callbacks.onSynced(model);
+      return deferred;
+    }
     return pushRequest(this, request);
   };
 
@@ -455,7 +450,7 @@ SyncMachine = {
   },
   beginSync: function() {
     var _ref;
-    if ((_ref = this._syncState) === UNSYNCED || _ref === SYNCED) {
+    if ((_ref = this._syncState) === UNSYNCED || _ref === SYNCED || _ref === PENDING) {
       this._previousSync = this._syncState;
       this._syncState = SYNCING;
       this.trigger(this._syncState, this, this._syncState);
@@ -515,7 +510,7 @@ module.exports = SyncMachine;
 
 });
 
-define('mnemosyne',['require','exports','module','../app/request_manager','../app/sync_machine','../app/utils'],function (require, exports, module) {var Mnemosyne, MnemosyneCollection, MnemosyneModel, RequestManager, SyncMachine, Utils, cacheRead, defaultCacheOptions, defaultOptions, load, read, removeFromCache, removeFromParentCache, removePendingModel, serverRead, serverWrite, updateCache, updateParentCache;
+define('mnemosyne',['require','exports','module','../app/request_manager','../app/sync_machine','../app/utils'],function (require, exports, module) {var Mnemosyne, MnemosyneCollection, MnemosyneModel, RequestManager, SyncMachine, Utils, cacheRead, defaultCacheOptions, defaultOptions, read, removeFromCache, removeFromParentCache, removePendingModel, serverRead, serverWrite, updateCache, updateParentCache, _destroy;
 
 RequestManager = require("../app/request_manager");
 
@@ -531,12 +526,12 @@ Utils = require("../app/utils");
 read = function(ctx, model, options) {
   var deferred;
   deferred = $.Deferred();
-  if (((typeof model.getKey === "function" ? model.getKey() : void 0) == null) || !model.cache.enabled) {
+  if (typeof model.getKey !== 'function' || !model.cache.enabled) {
     console.log("Cache forbidden");
     return serverRead(ctx, model, options, null, deferred);
   }
   console.log("Try loading value from cache");
-  load(model.getKey()).done(function(value) {
+  Utils.store.getItem(model.getKey()).done(function(value) {
     console.log("Succeed to read from cache");
     return cacheRead(ctx, model, options, value, deferred);
   }).fail(function() {
@@ -547,7 +542,7 @@ read = function(ctx, model, options) {
 };
 
 cacheRead = function(ctx, model, options, value, deferred) {
-  if (Utils.isCollection(model)) {
+  if (model instanceof Backbone.Collection) {
     _.map(model.parse(value.data), function(element) {
       if (element.id == null) {
         return console.warn('New model read in cache !');
@@ -556,22 +551,22 @@ cacheRead = function(ctx, model, options, value, deferred) {
   }
   if (options.forceRefresh || value.expirationDate < new Date().getTime()) {
     console.log("-- cache expired");
-    return serverRead(ctx, model, options, value, deferred);
+    return serverRead(ctx, model, options, value.data, deferred);
   } else {
     console.log("-- cache valid");
-    return deferred != null ? deferred.resolve(value.data) : void 0;
+    return deferred.resolve(value.data);
   }
 };
 
 serverRead = function(ctx, model, options, fallbackItem, deferred) {
   console.log("Sync from server");
   if ((fallbackItem != null) && model.cache.allowExpiredCache && !options.forceRefresh) {
-    deferred.resolve(fallbackItem.data);
+    deferred.resolve(fallbackItem);
     options.silent = true;
   }
   if (!Utils.isConnected()) {
     console.log('No connection');
-    if (Utils.isCollection(model)) {
+    if (model instanceof Backbone.Collection) {
       return deferred.resolve([]);
     } else {
       return deferred.reject();
@@ -592,47 +587,41 @@ serverRead = function(ctx, model, options, fallbackItem, deferred) {
   });
 };
 
-load = function(key) {
-  var deferred;
-  deferred = $.Deferred();
-  Utils.store.getItem(key).then(function(value) {
-    if (_.isEmpty(value) || (value.data == null)) {
-      return deferred.reject();
-    } else {
-      return deferred.resolve(value);
-    }
-  }, function() {
-    return deferred.reject();
-  });
-  return deferred;
-};
-
 removeFromParentCache = function(ctx, model) {
-  var deferred, parentKey;
+  var deferred, deferredArray, parentKeys;
   deferred = $.Deferred();
-  if (Utils.isCollection(model)) {
+  if (model instanceof Backbone.Collection) {
     console.warn('removeParentFromCache: collection as argument !');
     return deferred.resolve();
   }
-  if (model.isNew()) {
+  if (model.get('id') == null) {
     console.warn('removeParentFromCache: model is new !');
     return deferred.resolve();
   }
-  parentKey = model.getParentKey();
-  load(parentKey).done(function(value) {
-    var models;
-    models = value.data;
-    models = _.filter(models, function(m) {
-      return m.id !== model.get('id');
+  parentKeys = model.getParentKeys();
+  deferredArray = _.map(parentKeys, function(parentKey) {
+    var _deferred;
+    _deferred = $.Deferred();
+    return Utils.store.getItem(parentKey).done(function(value) {
+      var models;
+      models = value.data;
+      models = _.filter(models, function(m) {
+        return m.id !== model.get('id');
+      });
+      return Utils.store.setItem(parentKey, {
+        "data": models,
+        "expirationDate": value.expirationDate
+      }).always(function() {
+        return _deferred.resolve();
+      });
+    }).fail(function() {
+      return _deferred.resolve();
     });
-    return Utils.store.setItem(parentKey, {
-      "data": models,
-      "expirationDate": value.expirationDate
-    }).always(function() {
-      return deferred.resolve();
-    });
-  }).fail(function() {
+  });
+  $.when.apply($, deferredArray).then(function() {
     return deferred.resolve();
+  }, function() {
+    return deferred.reject();
   });
   return deferred;
 };
@@ -649,45 +638,59 @@ removeFromCache = function(ctx, model) {
 };
 
 updateParentCache = function(ctx, model) {
-  var deferred, parentKey, _base;
+  var deferred, deferredArray, parentKeys;
   deferred = $.Deferred();
-  if (Utils.isCollection(model) || typeof model.getParentKey !== 'function') {
+  if (model instanceof Backbone.Collection || typeof model.getParentKeys !== 'function') {
     return deferred.resolve();
   }
-  parentKey = model.getParentKey();
-  console.log("Updating parent cache [" + parentKey + "]");
-  if (model.isNew()) {
-    if ((_base = ctx._offlineCollections)[parentKey] == null) {
-      _base[parentKey] = [];
-    }
-    ctx._offlineCollections[parentKey] = Utils.addWithoutDuplicates(ctx._offlineCollections[parentKey], model);
-    deferred.resolve();
-  } else {
-    load(parentKey).done(function(value) {
-      var models, parentModel;
-      models = value.data;
-      parentModel = _.findWhere(models, {
-        "id": model.get('id')
-      });
-      if (parentModel != null) {
-        _.extend(parentModel, model.attributes);
-      } else {
-        models.unshift(model.attributes);
+  parentKeys = model.getParentKeys();
+  deferredArray = _.map(parentKeys, function(parentKey) {
+    var _base, _deferred;
+    _deferred = $.Deferred();
+    console.log("Updating parent cache [" + parentKey + "]");
+    if (model.get('id') == null) {
+      if ((_base = ctx._offlineCollections)[parentKey] == null) {
+        _base[parentKey] = [];
       }
-      return Utils.store.setItem(parentKey, {
-        "data": models,
-        "expirationDate": 0
-      }).always(function() {
-        return deferred.resolve();
+      ctx._offlineCollections[parentKey] = Utils.addWithoutDuplicates(ctx._offlineCollections[parentKey], model);
+      console.debug('model set');
+      _deferred.resolve();
+    } else {
+      Utils.store.getItem(parentKey).done(function(value) {
+        var models, parentModel;
+        models = value.data;
+        parentModel = _.findWhere(models, {
+          "id": model.get('id')
+        });
+        if (parentModel != null) {
+          _.extend(parentModel, model.attributes);
+        } else {
+          models.unshift(model.attributes);
+        }
+        return Utils.store.setItem(parentKey, {
+          "data": models,
+          "expirationDate": 0
+        }).always(function() {
+          return _deferred.resolve();
+        });
+      }).fail(function() {
+        return Utils.store.setItem(parentKey, {
+          "data": [model],
+          "expirationDate": 0
+        }).done(function() {
+          return _deferred.resolve();
+        }).fail(function() {
+          return _deferred.reject();
+        });
       });
-    }).fail(function() {
-      Utils.store.setItem(parentKey, {
-        "data": [model],
-        "expirationDate": 0
-      });
-      return deferred.resolve();
-    });
-  }
+    }
+    return _deferred;
+  });
+  $.when(deferredArray).then(function() {
+    return deferred.resolve();
+  }, function() {
+    return deferred.reject();
+  });
   return deferred;
 };
 
@@ -699,7 +702,7 @@ updateCache = function(ctx, model, data) {
   }
   expiredDate = (new Date()).getTime() + model.cache.ttl * 1000;
   console.log("Try to write cache -- expires at " + expiredDate);
-  if (model instanceof Backbone.Model && model.isNew()) {
+  if (model instanceof Backbone.Model && (model.get('id') == null)) {
     ctx._offlineModels = Utils.addWithoutDuplicates(ctx._offlineModels, model);
     deferred.resolve();
   } else {
@@ -728,12 +731,12 @@ updateCache = function(ctx, model, data) {
     Utils.store.setItem(model.getKey(), {
       "data": data,
       "expirationDate": expiredDate
-    }).then(function() {
+    }).done(function() {
       console.log("Succeed cache write");
       return updateParentCache(ctx, model).always(function() {
         return deferred.resolve();
       });
-    }, function() {
+    }).fail(function() {
       console.log("fail cache write");
       return deferred.reject();
     });
@@ -758,14 +761,25 @@ serverWrite = function(ctx, method, model, options, deferred) {
 };
 
 removePendingModel = function(ctx, model) {
-  var key;
+  var key, parentKeys, _i, _len, _results;
+  if (!model instanceof Backbone.Model) {
+    return;
+  }
   ctx._offlineModels = _.filter(ctx._offlineModels, function(m) {
     return m.get('_pending_id') !== model.get('_pending_id');
   });
-  key = model.getParentKey();
-  return ctx._offlineCollections[key] = _.filter(ctx._offlineCollections[key], function(m) {
-    return m.get('_pending_id') !== model.get('_pending_id');
-  });
+  parentKeys = model.getParentKeys();
+  if (parentKeys == null) {
+    parentKeys = [];
+  }
+  _results = [];
+  for (_i = 0, _len = parentKeys.length; _i < _len; _i++) {
+    key = parentKeys[_i];
+    _results.push(ctx._offlineCollections[key] = _.filter(ctx._offlineCollections[key], function(m) {
+      return m.get('_pending_id') !== model.get('_pending_id');
+    }));
+  }
+  return _results;
 };
 
 
@@ -797,9 +811,7 @@ module.exports = Mnemosyne = (function() {
   function Mnemosyne() {
     this._requestManager = new RequestManager({
       onSynced: function(model, value, method) {
-        if (method === 'delete') {
-          removeFromCache(_context, model);
-        } else {
+        if (method !== 'delete') {
           updateCache(_context, model, value);
         }
         removePendingModel(_context, model);
@@ -807,18 +819,26 @@ module.exports = Mnemosyne = (function() {
         return console.log('synced');
       },
       onPending: function(model) {
-        if (model.isNew()) {
+        var parentKey, parentKeys, _i, _len;
+        if (model.get('id') == null) {
           _context._offlineModels = Utils.addWithoutDuplicates(_context._offlineModels, model);
-          if (model.getParentKey() != null) {
-            _context._offlineCollections[model.getParentKey()] = Utils.addWithoutDuplicates(_context._offlineCollections[model.getParentKey()], model);
+          if (typeof model.getParentKeys === 'function') {
+            parentKeys = model.getParentKeys();
+            if (parentKeys == null) {
+              parentKeys = [];
+            }
+            for (_i = 0, _len = parentKeys.length; _i < _len; _i++) {
+              parentKey = parentKeys[_i];
+              _context._offlineCollections[parentKey] = Utils.addWithoutDuplicates(_context._offlineCollections[parentKey], model);
+            }
           }
         }
         model.pendingSync();
         return console.log('pending');
       },
       onCancelled: function(model) {
-        if (Utils.isModel(model)) {
-          if (model.isNew()) {
+        if (model instanceof Backbone.Model) {
+          if (model.get('id') == null) {
             console.warn("Model has not been updated yet !");
             removePendingModel(_context, model);
           } else {
@@ -832,27 +852,40 @@ module.exports = Mnemosyne = (function() {
     _context = this;
   }
 
-  Mnemosyne.prototype.cacheWrite = function(model) {
-    model.cache = _.defaults(model.cache || {}, defaultCacheOptions);
-    return updateCache(_context, model);
+  Mnemosyne.prototype.cacheWrite = function(key, value) {
+    var model;
+    if (key instanceof Backbone.Model || key instanceof Backbone.Collection) {
+      model = key;
+      model.cache = _.defaults(model.cache || {}, defaultCacheOptions);
+      return updateCache(_context, model);
+    }
+    return Utils.store.setItem(key, value);
   };
 
-  Mnemosyne.prototype.cacheRead = function(model) {
-    var deferred;
-    deferred = $.Deferred();
-    if (typeof model.getKey !== 'function') {
-      return deferred.reject();
+  Mnemosyne.prototype.cacheRead = function(key) {
+    var deferred, model;
+    if (key instanceof Backbone.Model || key instanceof Backbone.Collection) {
+      model = key;
+      deferred = $.Deferred();
+      if (typeof model.getKey !== 'function') {
+        return deferred.reject();
+      }
+      Utils.store.getItem(model.getKey()).done(function(value) {
+        return deferred.resolve(value.data);
+      }).fail(function() {
+        return deferred.reject();
+      });
+      return deferred;
     }
-    load(model.getKey()).done(function(value) {
-      return deferred.resolve(value.data);
-    }).fail(function() {
-      return deferred.reject();
-    });
-    return deferred;
-    return deferred;
+    return Utils.store.getItem(key);
   };
 
   Mnemosyne.prototype.cacheRemove = function(key) {
+    var model;
+    if (key instanceof Backbone.Model || key instanceof Backbone.Collection) {
+      model = key;
+      return removeFromCache(_context, model);
+    }
     return Utils.store.removeItem(key);
   };
 
@@ -905,7 +938,7 @@ module.exports = Mnemosyne = (function() {
           if (data == null) {
             data = [];
           }
-          if (Utils.isCollection(model)) {
+          if (model instanceof Backbone.Collection) {
             collection = model;
             models = _context._offlineCollections[collection.getKey()];
             if (models != null) {
@@ -922,7 +955,7 @@ module.exports = Mnemosyne = (function() {
           return model.finishSync();
         }).fail(function() {
           var collection, data, models, offlineModel, _i, _len;
-          if (Utils.isCollection(model)) {
+          if (model instanceof Backbone.Collection) {
             data = [];
             collection = model;
             models = _context._offlineCollections[collection.getKey()];
@@ -944,9 +977,9 @@ module.exports = Mnemosyne = (function() {
         });
         break;
       case 'delete':
+        removePendingModel(_context, model);
+        removeFromCache(_context, model);
         _context._requestManager.sync(method, model, options).done(function(data) {
-          removePendingModel(_context, model);
-          removeFromCache(_context, model);
           return deferred.resolve.apply(this, arguments);
         }).fail(function() {
           return deferred.reject.apply(this, arguments);
@@ -989,6 +1022,19 @@ MnemosyneCollection = (function() {
   return MnemosyneCollection;
 
 })();
+
+_destroy = Backbone.Model.prototype.destroy;
+
+Backbone.Model.prototype.destroy = function() {
+  var ret, _isNew;
+  _isNew = this.isNew;
+  this.isNew = function() {
+    return false;
+  };
+  ret = _destroy.apply(this, arguments);
+  this.isNew = _isNew;
+  return ret;
+};
 
 _.extend(Backbone.Model.prototype, SyncMachine);
 

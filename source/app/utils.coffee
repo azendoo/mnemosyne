@@ -6,19 +6,12 @@ module.exports = class Utils
     return window.navigator.onLine
 
 
-  @isCollection = (model) ->
-    return model instanceof Backbone.Collection
-
-
-  @isModel = (model) ->
-    return model instanceof Backbone.Model
-
-
   @addWithoutDuplicates = (array, model) ->
     return if not model?
     array = _.filter(array, (m) -> model.get('_pending_id') isnt m.get('_pending_id'))
     array.unshift(model)
     return array
+
 
   # Mock localForage
   @store = {}

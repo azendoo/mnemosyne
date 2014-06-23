@@ -18,7 +18,6 @@ resetTimer = (ctx) ->
 
 pushRequest = (ctx, request) ->
   deferred = $.Deferred()
-  return deferred.reject() if not request?
   ctx.pendingRequests.addTail(request.key, request)
 
   method = getMethod(request)
@@ -129,6 +128,7 @@ consume = (ctx) ->
 
 smartRequest= (ctx, request) ->
   # console.log "--smart--", request.methods
+
   if request.methods['delete']? and request.methods['create']?
     ctx.pendingRequests.retrieveItem(request.key)
     return null
@@ -146,7 +146,7 @@ removeMethod = (request, method) ->
 isRequestEmpty = (request) ->
   return Object.keys(request.methods).length is 0
 
-
+# TODO add 'patch':  'PATCH',
 getMethod= (request) ->
   if request.methods['create']
     return 'create'
@@ -197,6 +197,8 @@ module.exports = class RequestManager
 
   sync: (method, model, options = {}) ->
     # Is there allready some pending request for this model?
+    model.beginSync()
+
     request = @pendingRequests.getItem(model.getKey())
     request ?= {}
     request.methods  ?= {}
@@ -206,7 +208,11 @@ module.exports = class RequestManager
     request.key     = model.getKey()
 
     request = smartRequest(@, request)
+    if not request?
+      deferred = $.Deferred()
+      deferred.resolve()
+      @callbacks.onSynced(model)
+      return deferred
 
-    model.beginSync()
 
     return pushRequest(@, request)

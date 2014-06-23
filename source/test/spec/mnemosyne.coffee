@@ -5,6 +5,7 @@ module.exports = describe 'Mnemosyne specifications', ->
   model2 = null
   newModel = null
   collection = null
+  collection2 = null
   CustomModel = null
   CustomCollection = null
   Backbone  = require 'backbone'
@@ -42,7 +43,7 @@ module.exports = describe 'Mnemosyne specifications', ->
         super
 
       getKey: -> 'modelKey'
-      getParentKey: -> 'parentKey'
+      getParentKeys: -> ['parentKey1', 'parentKey2']
       getName: -> @get('name')
       setName: (value) -> @set('name', value)
       url: -> '/model'
@@ -51,7 +52,7 @@ module.exports = describe 'Mnemosyne specifications', ->
       model: CustomModel
       cache:
         enabled: true
-      getKey: -> 'parentKey'
+      getKey: -> 'parentKey1'
       url: -> '/collection'
 
 
@@ -67,6 +68,8 @@ module.exports = describe 'Mnemosyne specifications', ->
     newModel = new CustomModel()
     newModel.getKey = -> 'newModelKey'
     collection = new CustomCollection()
+    collection2 = new CustomCollection()
+    collection2.getKey = ->'parentKey2'
     mnemosyne.clear()
 
 
@@ -145,20 +148,40 @@ module.exports = describe 'Mnemosyne specifications', ->
 
 
       it 'should update the collection', (done) ->
-        mnemosyne.cacheWrite(collection)
-        .done ->
-          mnemosyne.cacheRead(collection)
-          .done (value) ->
+        mnemosyne.cacheWrite(collection).done ->
+          mnemosyne.cacheRead(collection).done (value) ->
             expect(value).to.be.empty
             collection.push(model)
             mnemosyne.cacheWrite(collection).done ->
-              model.setName(256)
-              mnemosyne.cacheWrite(model)
-              .done ->
-                mnemosyne.cacheRead(collection)
-                .done (value) ->
-                  expect(value[0].name).equals(256)
+              model.setName("myName")
+              mnemosyne.cacheWrite(model).done ->
+                mnemosyne.cacheRead(collection).done (value) ->
+                  expect(value[0].name).equals("myName")
                   done()
+
+      it 'should create parent collection cache', (done) ->
+        mnemosyne.cacheRead(collection).fail ->
+          mnemosyne.cacheRead(collection2).fail ->
+            model.save().done ->
+              mnemosyne.cacheRead(collection).done (value) ->
+                expect(value[0].name).to.equal("serverModel1")
+                mnemosyne.cacheRead(collection2).done (value) ->
+                  expect(value[0]).to.not.be.empty
+                  done()
+
+      it 'should update all parent Collection', (done) ->
+        model.setName('cacheName')
+        mnemosyne.cacheWrite(model).done ->
+          mnemosyne.cacheRead(collection).done (value) ->
+            expect(value[0].name).to.equal('cacheName')
+            mnemosyne.cacheRead(collection2).done (value) ->
+              expect(value[0].name).to.equal('cacheName')
+              model.save().done ->
+                mnemosyne.cacheRead(collection).done (value) ->
+                  expect(value[0].name).to.equal('serverModel1')
+                  mnemosyne.cacheRead(collection2).done (value) ->
+                    expect(value[0].name).to.equal('serverModel1')
+                    done()
 
       it 'should add the model to the cache of the parent collection if the model is not new', (done) ->
         collection.push(model)
@@ -297,7 +320,7 @@ module.exports = describe 'Mnemosyne specifications', ->
         it 'should get data from cache, and after, update it with server data'
 
         ###
-                    READ - ONLINE - CACHE EXPIRED - "allowExpiredCache : true"
+                    READ - ONLINE - CACHE EXPIRED - "allowExpiredCache : false"
         ###
         describe '"allowExpiredCache" set to false', ->
           beforeEach ->
@@ -457,16 +480,19 @@ module.exports = describe 'Mnemosyne specifications', ->
         # newModel.save()
 
       it 'should add the new model to offlineModels', (done) ->
+        newModel.setName('offline model')
         newModel.on 'pending', ->
           expect(mnemosyne._offlineModels.length).equals(1)
           done()
 
         newModel.save()
 
-      it 'should add the new model to offlineCollections', (done) ->
-        mnemosyne.clear()
+      it 'should add the new model to all offline parent collection', (done) ->
+        newModel.getParentKeys= -> ['parentKey1', 'parentKey2']
+        newModel.setName('offline model')
         newModel.on 'pending', ->
-          expect(mnemosyne._offlineCollections[newModel.getParentKey()].length).equals(1)
+          for parentKey in newModel.getParentKeys()
+            expect(mnemosyne._offlineCollections[parentKey].length).equals(1)
           done()
 
         newModel.save()
@@ -477,6 +503,38 @@ module.exports = describe 'Mnemosyne specifications', ->
         collection.fetch().always ->
           expect(collection.models).not.be.empty
           done()
+
+      it 'should remove the model from the cache of all parent collection', (done) ->
+        model.setName('offline model')
+
+        model.save().done ->
+          mnemosyne.cacheRead(collection).done (value) ->
+            expect(value).to.be.not.empty
+            mnemosyne.cacheRead(collection2).done (value) ->
+              expect(value).to.be.not.empty
+              model.on 'pending', ->
+                mnemosyne.cacheRead(collection).done (value) ->
+                  expect(value).to.be.empty
+                  mnemosyne.cacheRead(collection2).done (value) ->
+                    expect(value).to.be.empty
+                    done()
+
+              model.destroy()
+
+
+
+      it 'should remove the new model from all offline parent collection', (done) ->
+        newModel.getParentKeys= -> ['parentKey1', 'parentKey2']
+        newModel.setName('offline model')
+        newModel.on 'pending', ->
+          newModel.destroy()
+
+        newModel.on 'synced', ->
+          for parentKey in newModel.getParentKeys()
+            expect(mnemosyne._offlineCollections[parentKey]).to.be.empty
+          done()
+
+        newModel.save()
 
     it 'should trigger "syncing" event on model', (done) ->
       model.on 'syncing', -> done()

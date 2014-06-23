@@ -50,7 +50,7 @@ SyncMachine =
     return
 
   beginSync: ->
-    if @_syncState in [UNSYNCED, SYNCED]
+    if @_syncState in [UNSYNCED, SYNCED, PENDING]
       @_previousSync = @_syncState
       @_syncState = SYNCING
       @trigger @_syncState, this, @_syncState
