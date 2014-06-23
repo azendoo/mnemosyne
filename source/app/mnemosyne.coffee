@@ -88,6 +88,7 @@ removeFromParentCache = (ctx, model) ->
     return deferred.resolve()
 
   parentKeys = model.getParentKeys()
+  return deferred.resolve() if parentKeys.length is 0
 
   deferredArray = _.map(parentKeys, (parentKey)->
     _deferred = $.Deferred()
@@ -122,8 +123,9 @@ updateParentCache = (ctx, model) ->
   deferred = $.Deferred()
 
   # return deferred.resolve()  if model instanceof Backbone.Collection
-  return deferred.resolve()  if model instanceof Backbone.Collection or typeof model.getParentKeys isnt 'function'
+  return deferred.resolve()  if model instanceof Backbone.Collection
   parentKeys = model.getParentKeys()
+  return deferred.resolve() if parentKeys.length is 0
 
   deferredArray = _.map(parentKeys, (parentKey)->
     _deferred = $.Deferred()
@@ -229,7 +231,6 @@ removePendingModel = (ctx, model) ->
   return if not model instanceof Backbone.Model
   ctx._offlineModels = _.filter(ctx._offlineModels, (m) -> m.get('_pending_id') isnt model.get('_pending_id'))
   parentKeys = model.getParentKeys()
-  parentKeys ?= []
   for key in parentKeys
     ctx._offlineCollections[key] = _.filter(ctx._offlineCollections[key], (m) -> m.get('_pending_id') isnt model.get('_pending_id'))
 
@@ -277,11 +278,9 @@ module.exports = class Mnemosyne
           _context._offlineModels = Utils.addWithoutDuplicates(_context._offlineModels, model)
 
           #Add the model to offline parent collection
-          if typeof model.getParentKeys is 'function'
-            parentKeys = model.getParentKeys()
-            parentKeys ?= []
-            for parentKey in parentKeys
-              _context._offlineCollections[parentKey] = Utils.addWithoutDuplicates(_context._offlineCollections[parentKey], model)
+          parentKeys = model.getParentKeys()
+          for parentKey in parentKeys
+            _context._offlineCollections[parentKey] = Utils.addWithoutDuplicates(_context._offlineCollections[parentKey], model)
         model.pendingSync()
         console.log 'pending'
 
@@ -416,6 +415,8 @@ class MnemosyneModel
 
   getPendingId: ->
     return @get('_pending_id')
+
+  getParentKeys: -> []
 
   sync: -> Mnemosyne.prototype.sync.apply this, arguments
 

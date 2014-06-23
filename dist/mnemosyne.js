@@ -599,6 +599,9 @@ removeFromParentCache = function(ctx, model) {
     return deferred.resolve();
   }
   parentKeys = model.getParentKeys();
+  if (parentKeys.length === 0) {
+    return deferred.resolve();
+  }
   deferredArray = _.map(parentKeys, function(parentKey) {
     var _deferred;
     _deferred = $.Deferred();
@@ -640,10 +643,13 @@ removeFromCache = function(ctx, model) {
 updateParentCache = function(ctx, model) {
   var deferred, deferredArray, parentKeys;
   deferred = $.Deferred();
-  if (model instanceof Backbone.Collection || typeof model.getParentKeys !== 'function') {
+  if (model instanceof Backbone.Collection) {
     return deferred.resolve();
   }
   parentKeys = model.getParentKeys();
+  if (parentKeys.length === 0) {
+    return deferred.resolve();
+  }
   deferredArray = _.map(parentKeys, function(parentKey) {
     var _base, _deferred;
     _deferred = $.Deferred();
@@ -769,9 +775,6 @@ removePendingModel = function(ctx, model) {
     return m.get('_pending_id') !== model.get('_pending_id');
   });
   parentKeys = model.getParentKeys();
-  if (parentKeys == null) {
-    parentKeys = [];
-  }
   _results = [];
   for (_i = 0, _len = parentKeys.length; _i < _len; _i++) {
     key = parentKeys[_i];
@@ -822,15 +825,10 @@ module.exports = Mnemosyne = (function() {
         var parentKey, parentKeys, _i, _len;
         if (model.get('id') == null) {
           _context._offlineModels = Utils.addWithoutDuplicates(_context._offlineModels, model);
-          if (typeof model.getParentKeys === 'function') {
-            parentKeys = model.getParentKeys();
-            if (parentKeys == null) {
-              parentKeys = [];
-            }
-            for (_i = 0, _len = parentKeys.length; _i < _len; _i++) {
-              parentKey = parentKeys[_i];
-              _context._offlineCollections[parentKey] = Utils.addWithoutDuplicates(_context._offlineCollections[parentKey], model);
-            }
+          parentKeys = model.getParentKeys();
+          for (_i = 0, _len = parentKeys.length; _i < _len; _i++) {
+            parentKey = parentKeys[_i];
+            _context._offlineCollections[parentKey] = Utils.addWithoutDuplicates(_context._offlineCollections[parentKey], model);
           }
         }
         model.pendingSync();
@@ -1002,6 +1000,10 @@ MnemosyneModel = (function() {
 
   MnemosyneModel.prototype.getPendingId = function() {
     return this.get('_pending_id');
+  };
+
+  MnemosyneModel.prototype.getParentKeys = function() {
+    return [];
   };
 
   MnemosyneModel.prototype.sync = function() {
