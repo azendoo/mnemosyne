@@ -510,13 +510,98 @@ module.exports = SyncMachine;
 
 });
 
-define('mnemosyne',['require','exports','module','../app/request_manager','../app/sync_machine','../app/utils'],function (require, exports, module) {var Mnemosyne, MnemosyneCollection, MnemosyneModel, RequestManager, SyncMachine, Utils, cacheRead, defaultCacheOptions, defaultOptions, read, removeFromCache, removeFromParentCache, removePendingModel, serverRead, serverWrite, updateCache, updateParentCache, _destroy;
+define('../app/connection_manager',['require','exports','module'],function (require, exports, module) {
+/*
+  Manage the connection, provide callbacks on connection lost and recovered
+ */
+var ConnectionManager,
+  __bind = function(fn, me){ return function(){ return fn.apply(me, arguments); }; };
+
+module.exports = ConnectionManager = (function() {
+  var _CHECK_INTERVAL;
+
+  _CHECK_INTERVAL = 1000;
+
+  ConnectionManager.prototype._connectionLostCallbacks = {};
+
+  ConnectionManager.prototype._connectionRecoveredCallbacks = {};
+
+  function ConnectionManager() {
+    this._watchConnection = __bind(this._watchConnection, this);
+    this._watchConnection();
+    this.onLine = window.navigator.onLine;
+  }
+
+  ConnectionManager.prototype._watchConnection = function() {
+    if (window.navigator.onLine && !this.onLine) {
+      _.map(this._connectionRecoveredCallbacks, function(callback) {
+        var e;
+        try {
+          return callback(true);
+        } catch (_error) {
+          e = _error;
+          return console.error("Cannot call ", callback);
+        }
+      });
+    } else if (!window.navigator.onLine && this.onLine) {
+      _.map(this._connectionLostCallbacks, function(callback) {
+        var e;
+        try {
+          return callback(false);
+        } catch (_error) {
+          e = _error;
+          return console.error("Cannot call ", callback);
+        }
+      });
+    }
+    this.onLine = window.navigator.onLine;
+    return setTimeout(this._watchConnection, _CHECK_INTERVAL);
+  };
+
+  ConnectionManager.prototype.subscribe = function(event, key, callback) {
+    if (typeof key !== 'string' || typeof callback !== 'function') {
+      return;
+    }
+    switch (event) {
+      case 'connectionLost':
+        return this._connectionLostCallbacks[key] = callback;
+      case 'connectionRecovered':
+        return this._connectionRecoveredCallbacks[key] = callback;
+      default:
+        return console.warn('No callback for ', event);
+    }
+  };
+
+  ConnectionManager.prototype.unsubscribe = function(event, key) {
+    switch (event) {
+      case 'connectionLost':
+        return delete this._connectionLostCallbacks[key];
+      case 'connectionRecovered':
+        return delete this._connectionRecoveredCallbacks[key];
+      default:
+        return console.warn('No callback for ', event);
+    }
+  };
+
+  ConnectionManager.prototype.isOnline = function() {
+    return window.navigator.onLine;
+  };
+
+  return ConnectionManager;
+
+})();
+
+});
+
+define('mnemosyne',['require','exports','module','../app/request_manager','../app/sync_machine','../app/utils','../app/connection_manager'],function (require, exports, module) {var ConnectionManager, Mnemosyne, MnemosyneCollection, MnemosyneModel, RequestManager, SyncMachine, Utils, cacheRead, defaultCacheOptions, defaultOptions, read, removeFromCache, removeFromParentCache, removePendingModel, serverRead, serverWrite, updateCache, updateParentCache, _destroy;
 
 RequestManager = require("../app/request_manager");
 
 SyncMachine = require("../app/sync_machine");
 
 Utils = require("../app/utils");
+
+ConnectionManager = require("../app/connection_manager");
 
 
 /*
@@ -805,6 +890,8 @@ module.exports = Mnemosyne = (function() {
 
   Mnemosyne.prototype._requestManager = null;
 
+  Mnemosyne.prototype._connectionManager = null;
+
   Mnemosyne.prototype._offlineCollections = {};
 
   Mnemosyne.prototype._offlineModels = [];
@@ -812,6 +899,7 @@ module.exports = Mnemosyne = (function() {
   _context = null;
 
   function Mnemosyne() {
+    this._connectionManager = new ConnectionManager();
     this._requestManager = new RequestManager({
       onSynced: function(model, value, method) {
         if (method !== 'delete') {
@@ -906,6 +994,18 @@ module.exports = Mnemosyne = (function() {
       return;
     }
     return cancelRequest(this, request);
+  };
+
+  Mnemosyne.prototype.subscribe = function(event, key, callback) {
+    return _context._connectionManager.subscribe(event, key, callback);
+  };
+
+  Mnemosyne.prototype.unsubscribe = function(event, key) {
+    return _context._connectionManager.unsubscribe(event, key);
+  };
+
+  Mnemosyne.prototype.isOnline = function() {
+    return _context._connectionManager.isOnline();
   };
 
   Mnemosyne.prototype.clear = function() {

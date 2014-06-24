@@ -1,6 +1,7 @@
 RequestManager = require "../app/request_manager"
 SyncMachine    = require "../app/sync_machine"
 Utils          = require "../app/utils"
+ConnectionManager = require "../app/connection_manager"
 # Backbone = require "backbone"
 # _        = require "underscore"
 
@@ -253,6 +254,7 @@ defaultCacheOptions =
 module.exports = class Mnemosyne
 
   _requestManager: null
+  _connectionManager: null
 
   # Contains all models to append to collections
   _offlineCollections: {}
@@ -262,7 +264,8 @@ module.exports = class Mnemosyne
 
   _context = null
   constructor: ->
-    @_requestManager = new RequestManager
+    @_connectionManager = new ConnectionManager()
+    @_requestManager    = new RequestManager
       onSynced  : (model, value, method) ->
         if method isnt 'delete'
           updateCache(_context, model, value)
@@ -297,7 +300,6 @@ module.exports = class Mnemosyne
             console.log "TODO rollback"
         model.unsync()
         console.log 'unsynced'
-
 
     _context = @
 
@@ -345,6 +347,17 @@ module.exports = class Mnemosyne
     request = @pendingRequests.retrieveItem(key)
     return if not request?
     cancelRequest(@, request)
+
+
+  subscribe: (event, key, callback)->
+    _context._connectionManager.subscribe(event, key, callback)
+
+
+  unsubscribe: (event, key) ->
+    _context._connectionManager.unsubscribe(event, key)
+
+
+  isOnline: -> _context._connectionManager.isOnline()
 
 
   clear: ->
