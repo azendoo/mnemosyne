@@ -22,12 +22,12 @@ module.exports = describe 'Request Manager specifications', ->
         )
 
   beforeEach ->
+    localStorage.clear()
     serverSpy = sinon.spy()
     requestManager = new RequestManager
       onSynced    : (model) -> model.finishSync()
       onPending   : (model) -> model.pendingSync()
       onCancelled : (model) -> model.unsync()
-    requestManager.clear()
 
     class CustomModel extends Backbone.Model
       cache:
@@ -82,6 +82,36 @@ module.exports = describe 'Request Manager specifications', ->
           requestManager.clear()
           expect(requestManager.interval).to.equal(125)
           done()),250)
+
+  describe 'Database persistence', ->
+
+    it 'should save the queue in db', (done) ->
+      serverAutoRespondError()
+      $.when(
+        requestManager.sync('create', model1),
+        requestManager.sync('create', model2),
+        requestManager.sync('create', model3)
+      ).done ->
+        expect(JSON.parse(localStorage.getItem('mnemosyne.pendingRequests.orderedKeys')).length).to.equal(3)
+        expect(Object.keys(JSON.parse(localStorage.getItem('mnemosyne.pendingRequests.dict'))).length).to.equal(3)
+        done()
+
+    it 'should load and try sync when db storage is not empty', (done) ->
+      serverAutoRespondError()
+      $.when(
+        requestManager.sync('create', model1),
+        requestManager.sync('create', model2),
+        requestManager.sync('create', model3)
+      ).done ->
+        requestManager = new RequestManager()
+        expect(requestManager.getPendingRequests().length).to.equal(3)
+        setTimeout(
+          ->
+            expect(requestManager.interval).to.be.above(125)
+            done()
+          250
+        )
+
 
   ###
               +++++ ONLINE +++++

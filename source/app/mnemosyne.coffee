@@ -53,7 +53,6 @@ serverRead = (ctx, model, options, fallbackItem, deferred) ->
   # Return cache data and update silently the cache
   if fallbackItem? and model.cache.allowExpiredCache and not options.forceRefresh
     deferred.resolve(fallbackItem)
-    options.silent = true
 
   if not Utils.isConnected()
     console.log 'No connection'
@@ -290,14 +289,9 @@ module.exports = class Mnemosyne
 
       onCancelled : (model) ->
         if model instanceof Backbone.Model
-          # DEBUG
-          if not model.get('id')?
-            console.warn "Model has not been updated yet !"
+          # Remove the model from offline models and collection
+          removePendingModel(_context, model)
 
-            # Remove the model from offline models and collection
-            removePendingModel(_context, model)
-          else
-            console.log "TODO rollback"
         model.unsync()
         console.log 'unsynced'
 

@@ -3,7 +3,10 @@
 module.exports = class Utils
 
   @isConnected = ->
-    return window.navigator.onLine
+    if window.device
+      return window.navigator.connection.type isnt Connection.NONE
+    else
+      return window.navigator.onLine
 
 
   @addWithoutDuplicates = (array, model) ->

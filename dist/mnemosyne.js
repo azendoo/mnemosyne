@@ -13,11 +13,8 @@
 define('../app/magic_queue',['require','exports','module'],function (require, exports, module) {
 /*
   - MagicQueue -
-
-  - TODO -
-  db persistence
  */
-var MagicQueue, removeValue;
+var DEFAULT_STORAGE_KEY, MagicQueue, dbSync, removeValue;
 
 removeValue = function(ctx, key) {
   var value;
@@ -26,33 +23,43 @@ removeValue = function(ctx, key) {
   return value;
 };
 
-({
-  KEY: 'mnemosyne.pendingRequests'
-});
+dbSync = function(ctx) {
+  localStorage.setItem(ctx.key + '.orderedKeys', JSON.stringify(ctx.orderedKeys));
+  return localStorage.setItem(ctx.key + '.dict', JSON.stringify(ctx.dict));
+};
+
+DEFAULT_STORAGE_KEY = 'mnemosyne.pendingRequests';
 
 module.exports = MagicQueue = (function() {
-  function MagicQueue() {}
-
   MagicQueue.prototype.orderedKeys = [];
 
   MagicQueue.prototype.dict = {};
 
+  function MagicQueue(key, onRestore) {
+    this.key = key != null ? key : DEFAULT_STORAGE_KEY;
+    this.orderedKeys = JSON.parse(localStorage.getItem(this.key + '.orderedKeys')) || [];
+    this.dict = JSON.parse(localStorage.getItem(this.key + '.dict')) || {};
+    if (typeof onRestore === 'function') {
+      _.map(this.dict, onRestore);
+    }
+  }
+
   MagicQueue.prototype.addHead = function(key, value) {
     this.retrieveItem(key);
     this.orderedKeys.push(key);
-    return this.dict[key] = value;
+    this.dict[key] = value;
+    return dbSync(this);
   };
 
   MagicQueue.prototype.addTail = function(key, value) {
     this.retrieveItem(key);
     this.orderedKeys.unshift(key);
-    return this.dict[key] = value;
+    this.dict[key] = value;
+    return dbSync(this);
   };
 
   MagicQueue.prototype.getHead = function() {
-    var len;
-    len = this.orderedKeys.length;
-    return this.dict[this.orderedKeys[len - 1]];
+    return this.dict[_.last(this.orderedKeys)];
   };
 
   MagicQueue.prototype.getTail = function() {
@@ -73,6 +80,7 @@ module.exports = MagicQueue = (function() {
     }
     key = this.orderedKeys.pop();
     value = removeValue(this, key);
+    dbSync(this);
     return value;
   };
 
@@ -83,17 +91,20 @@ module.exports = MagicQueue = (function() {
     }
     key = this.orderedKeys.shift();
     value = removeValue(this, key);
+    dbSync(this);
     return value;
   };
 
   MagicQueue.prototype.retrieveItem = function(key) {
-    var indexKey;
+    var indexKey, value;
     indexKey = this.orderedKeys.indexOf(key);
     if (indexKey === -1) {
       return null;
     }
     this.orderedKeys.splice(indexKey, 1);
-    return removeValue(this, key);
+    value = removeValue(this, key);
+    dbSync(this);
+    return value;
   };
 
   MagicQueue.prototype.getItem = function(key) {
@@ -106,7 +117,8 @@ module.exports = MagicQueue = (function() {
 
   MagicQueue.prototype.clear = function() {
     this.orderedKeys = [];
-    return this.dict = {};
+    this.dict = {};
+    return dbSync(this);
   };
 
   MagicQueue.prototype.getQueue = function() {
@@ -134,7 +146,11 @@ module.exports = Utils = (function() {
   function Utils() {}
 
   Utils.isConnected = function() {
-    return window.navigator.onLine;
+    if (window.device) {
+      return window.navigator.connection.type !== Connection.NONE;
+    } else {
+      return window.navigator.onLine;
+    }
   };
 
   Utils.addWithoutDuplicates = function(array, model) {
@@ -180,7 +196,7 @@ module.exports = Utils = (function() {
 
 });
 
-define('../app/request_manager',['require','exports','module','../app/magic_queue','../app/utils'],function (require, exports, module) {var MAX_INTERVAL, MIN_INTERVAL, MagicQueue, RequestManager, Utils, consume, defaultCallbacks, getMethod, isRequestEmpty, pushRequest, removeMethod, resetTimer, smartRequest;
+define('../app/request_manager',['require','exports','module','../app/magic_queue','../app/utils'],function (require, exports, module) {var MAX_INTERVAL, MIN_INTERVAL, MagicQueue, RequestManager, Utils, clearTimer, consume, defaultCallbacks, getMethod, isRequestEmpty, pushRequest, removeMethod, smartRequest;
 
 MagicQueue = require("../app/magic_queue");
 
@@ -190,7 +206,7 @@ MAX_INTERVAL = 2000;
 
 MIN_INTERVAL = 125;
 
-resetTimer = function(ctx) {
+clearTimer = function(ctx) {
   clearTimeout(ctx.timeout);
   ctx.timeout = null;
   return ctx.interval = MIN_INTERVAL;
@@ -251,7 +267,7 @@ consume = function(ctx) {
   request = ctx.pendingRequests.getHead();
   if (request == null) {
     console.log('[consume] -- done! 0 pending');
-    resetTimer(ctx);
+    clearTimer(ctx);
     return;
   }
   if (!Utils.isConnected()) {
@@ -341,19 +357,39 @@ defaultCallbacks = {
 
 module.exports = RequestManager = (function() {
   function RequestManager(callbacks) {
+    var onRestore;
     this.callbacks = callbacks != null ? callbacks : {};
     _.defaults(this.callbacks, defaultCallbacks);
-    this.pendingRequests = new MagicQueue();
-    resetTimer(this);
+    onRestore = function(request) {
+      request.model = new Backbone.Model(request.model);
+      request.model.getKey = function() {
+        return request.key;
+      };
+      request.model.getParentKeys = function() {
+        return request.parentKeys;
+      };
+      request.model.url = function() {
+        return request.url;
+      };
+      return request;
+    };
+    this.pendingRequests = new MagicQueue(void 0, onRestore);
+    this.retrySync();
   }
 
   RequestManager.prototype.clear = function() {
-    this.pendingRequests.getQueue().map((function(_this) {
-      return function(request) {
-        return _this.callbacks.onCancelled(request.model);
-      };
-    })(this));
-    resetTimer(this);
+    var e;
+    clearTimer(this);
+    try {
+      this.pendingRequests.getQueue().map((function(_this) {
+        return function(request) {
+          return _this.callbacks.onCancelled(request.model);
+        };
+      })(this));
+    } catch (_error) {
+      e = _error;
+      console.warn("Bad content found into mnemosyne magic queue");
+    }
     return this.pendingRequests.clear();
   };
 
@@ -362,7 +398,7 @@ module.exports = RequestManager = (function() {
   };
 
   RequestManager.prototype.retrySync = function() {
-    resetTimer(this);
+    clearTimer(this);
     return consume(this);
   };
 
@@ -391,6 +427,8 @@ module.exports = RequestManager = (function() {
     request.model = model;
     request.methods[method] = options;
     request.key = model.getKey();
+    request.parentKeys = model.getParentKeys();
+    request.url = _.result(model, 'url');
     request = smartRequest(this, request);
     if (request == null) {
       deferred = $.Deferred();
@@ -510,12 +548,15 @@ module.exports = SyncMachine;
 
 });
 
-define('../app/connection_manager',['require','exports','module'],function (require, exports, module) {
+define('../app/connection_manager',['require','exports','module','../app/utils'],function (require, exports, module) {var ConnectionManager, Utils,
+  __bind = function(fn, me){ return function(){ return fn.apply(me, arguments); }; };
+
+Utils = require("../app/utils");
+
+
 /*
   Manage the connection, provide callbacks on connection lost and recovered
  */
-var ConnectionManager,
-  __bind = function(fn, me){ return function(){ return fn.apply(me, arguments); }; };
 
 module.exports = ConnectionManager = (function() {
   var _CHECK_INTERVAL;
@@ -529,11 +570,11 @@ module.exports = ConnectionManager = (function() {
   function ConnectionManager() {
     this._watchConnection = __bind(this._watchConnection, this);
     this._watchConnection();
-    this.onLine = window.navigator.onLine;
+    this.onLine = Utils.isConnected();
   }
 
   ConnectionManager.prototype._watchConnection = function() {
-    if (window.navigator.onLine && !this.onLine) {
+    if (Utils.isConnected() && !this.onLine) {
       _.map(this._connectionRecoveredCallbacks, function(callback) {
         var e;
         try {
@@ -543,7 +584,7 @@ module.exports = ConnectionManager = (function() {
           return console.error("Cannot call ", callback);
         }
       });
-    } else if (!window.navigator.onLine && this.onLine) {
+    } else if (!Utils.isConnected() && this.onLine) {
       _.map(this._connectionLostCallbacks, function(callback) {
         var e;
         try {
@@ -554,7 +595,7 @@ module.exports = ConnectionManager = (function() {
         }
       });
     }
-    this.onLine = window.navigator.onLine;
+    this.onLine = Utils.isConnected();
     return setTimeout(this._watchConnection, _CHECK_INTERVAL);
   };
 
@@ -584,7 +625,7 @@ module.exports = ConnectionManager = (function() {
   };
 
   ConnectionManager.prototype.isOnline = function() {
-    return window.navigator.onLine;
+    return Utils.isConnected();
   };
 
   return ConnectionManager;
@@ -924,12 +965,7 @@ module.exports = Mnemosyne = (function() {
       },
       onCancelled: function(model) {
         if (model instanceof Backbone.Model) {
-          if (model.get('id') == null) {
-            console.warn("Model has not been updated yet !");
-            removePendingModel(_context, model);
-          } else {
-            console.log("TODO rollback");
-          }
+          removePendingModel(_context, model);
         }
         model.unsync();
         return console.log('unsynced');

@@ -1,3 +1,5 @@
+Utils = require "../app/utils"
+
 
 ###
   Manage the connection, provide callbacks on connection lost and recovered
@@ -10,11 +12,11 @@ module.exports = class  ConnectionManager
 
   constructor: ->
     @_watchConnection()
-    @onLine = window.navigator.onLine
+    @onLine = Utils.isConnected()
 
   _watchConnection: =>
     # Connection revovered
-    if window.navigator.onLine and not @onLine
+    if Utils.isConnected() and not @onLine
       _.map(@_connectionRecoveredCallbacks, (callback) ->
         try
           callback(true)
@@ -23,7 +25,7 @@ module.exports = class  ConnectionManager
           )
 
     # Connection lost
-    else if not window.navigator.onLine and @onLine
+    else if not Utils.isConnected() and @onLine
       _.map(@_connectionLostCallbacks, (callback) ->
         try
           callback(false)
@@ -31,7 +33,7 @@ module.exports = class  ConnectionManager
           console.error "Cannot call ", callback
           )
 
-    @onLine = window.navigator.onLine
+    @onLine = Utils.isConnected()
     setTimeout(@_watchConnection, _CHECK_INTERVAL)
 
   subscribe: (event, key, callback) ->
@@ -53,4 +55,4 @@ module.exports = class  ConnectionManager
       else
         console.warn 'No callback for ', event
 
-  isOnline: -> window.navigator.onLine
+  isOnline: -> Utils.isConnected()

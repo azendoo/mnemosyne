@@ -10,7 +10,7 @@ MAX_INTERVAL= 2000  # 64 seconds
 MIN_INTERVAL= 125   # 125ms
 
 
-resetTimer = (ctx) ->
+clearTimer = (ctx) ->
   clearTimeout(ctx.timeout)
   ctx.timeout  = null
   ctx.interval = MIN_INTERVAL
@@ -75,7 +75,7 @@ consume = (ctx) ->
   request = ctx.pendingRequests.getHead()
   if (not request?)
     console.log '[consume] -- done! 0 pending'
-    resetTimer(ctx)
+    clearTimer(ctx)
     return
 
   if (not Utils.isConnected())
@@ -84,7 +84,7 @@ consume = (ctx) ->
     console.log '[consume] -- not connected, next try in ', ctx.interval
     return ctx.timeout  = setTimeout( (-> consume(ctx) ), ctx.interval)
 
-  method  = getMethod(request);
+  method  = getMethod(request)
   options = request.methods[method]
   pendingId = request.model.get('_pending_id')
 
@@ -125,7 +125,6 @@ consume = (ctx) ->
 
 # Optimize request avoiding to send some useless data
 # TODO add 'patch':  'PATCH',
-
 smartRequest= (ctx, request) ->
   # console.log "--smart--", request.methods
 
@@ -170,13 +169,23 @@ module.exports = class RequestManager
 
   constructor: (@callbacks={}) ->
     _.defaults(@callbacks, defaultCallbacks)
-    @pendingRequests = new MagicQueue()
-    resetTimer(@)
+    onRestore = (request) ->
+      request.model = new Backbone.Model(request.model)
+      request.model.getKey = -> request.key
+      request.model.getParentKeys = -> request.parentKeys
+      request.model.url = -> request.url
+      return request
+
+    @pendingRequests = new MagicQueue(undefined, onRestore)
+    @retrySync()
 
 
   clear: ->
-    @pendingRequests.getQueue().map((request) => @callbacks.onCancelled(request.model))
-    resetTimer(@)
+    clearTimer(@)
+    try
+      @pendingRequests.getQueue().map((request) => @callbacks.onCancelled(request.model))
+    catch e
+      console.warn "Bad content found into mnemosyne magic queue"
     @pendingRequests.clear()
 
 
@@ -185,7 +194,7 @@ module.exports = class RequestManager
 
 
   retrySync: ->
-    resetTimer(@)
+    clearTimer(@)
     consume(@)
 
 
@@ -206,7 +215,8 @@ module.exports = class RequestManager
     request.model   = model
     request.methods[method] = options
     request.key     = model.getKey()
-
+    request.parentKeys = model.getParentKeys()
+    request.url = _.result(model, 'url')
     request = smartRequest(@, request)
     if not request?
       deferred = $.Deferred()
