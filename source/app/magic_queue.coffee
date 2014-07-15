@@ -7,10 +7,11 @@ removeValue = (ctx, key) ->
   delete  ctx.dict[key]
   return value
 
-#Save the queue in DB
+#Sync the queue with database
 dbSync = (ctx) ->
-  localStorage.setItem(ctx.key + '.orderedKeys', JSON.stringify(ctx.orderedKeys))
-  localStorage.setItem(ctx.key + '.dict', JSON.stringify(ctx.dict))
+  _.defer ->
+    localStorage.setItem(ctx.key + '.orderedKeys', JSON.stringify(ctx.orderedKeys))
+    localStorage.setItem(ctx.key + '.dict', JSON.stringify(ctx.dict))
 
 DEFAULT_STORAGE_KEY = 'mnemosyne.pendingRequests'
 
@@ -26,6 +27,8 @@ module.exports = class MagicQueue
     # Load the queue from localStorage
     @orderedKeys = JSON.parse(localStorage.getItem(@key + '.orderedKeys')) or []
     @dict        = JSON.parse(localStorage.getItem(@key + '.dict'))        or {}
+
+    # Apply the `onRestore` fun on each restored elements
     if typeof onRestore is 'function'
       _.map(@dict, onRestore)
 
@@ -52,6 +55,10 @@ module.exports = class MagicQueue
     @dict[@orderedKeys[0]]
 
 
+  getItem: (key) ->
+    @dict[key] or null
+
+
   rotate: ->
     return if @orderedKeys.length < 1
     @orderedKeys.unshift(@orderedKeys.pop())
@@ -59,7 +66,7 @@ module.exports = class MagicQueue
 
   retrieveHead: ->
     return null if @orderedKeys.length is 0
-    key = @orderedKeys.pop()
+    key   = @orderedKeys.pop()
     value = removeValue(@, key)
     dbSync(this)
     return value
@@ -67,39 +74,32 @@ module.exports = class MagicQueue
 
   retrieveTail: ->
     return null if @orderedKeys.length is 0
-    key = @orderedKeys.shift()
+    key   = @orderedKeys.shift()
     value = removeValue(@, key)
     dbSync(this)
     return value
 
 
   retrieveItem: (key) ->
+    return null if not @dict[key]?
     indexKey = @orderedKeys.indexOf(key)
-    return null if indexKey is -1
     @orderedKeys.splice(indexKey, 1)
     value = removeValue(@, key)
     dbSync(this)
     return value
 
 
-  getItem: (key) ->
-    @dict[key] or null
-
-  # TODO improve complexity
   isEmpty: ->
-    return @getQueue().length is 0
+    return @orderedKeys.length is 0
+
+
+  getQueue: () ->
+    _.map(@orderedKeys, (key) =>
+      return @dict[key]
+      )
+
 
   clear: ->
     @orderedKeys = []
     @dict = {}
-
     dbSync(this)
-
-
-  getQueue: () ->
-    queue = []
-    for key in @orderedKeys
-      if @dict[key]? and not @dict[key].removed
-        queue.push(@dict[key])
-
-    return queue

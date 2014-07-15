@@ -2,7 +2,7 @@ Utils = require "../app/utils"
 
 
 ###
-  Manage the connection, provide callbacks on connection lost and recovered
+  Watch the connection, providing callbacks on connection lost and recovered
 ###
 module.exports = class  ConnectionManager
 
@@ -53,6 +53,6 @@ module.exports = class  ConnectionManager
       when 'connectionRecovered'
         delete @_connectionRecoveredCallbacks[key]
       else
-        console.warn 'No callback for ', event
+        console.warn 'No callback registered for ', event
 
   isOnline: -> Utils.isConnected()

@@ -2,8 +2,10 @@
 
 module.exports = class Utils
 
+  # Return true if we are connected, false otherwise ;)
   @isConnected = ->
-    if window.device
+    # Require cordova plugin org.apache.cordova.core.network-information
+    if window.device && window.navigator.connection?
       return window.navigator.connection.type isnt Connection.NONE
     else
       return window.navigator.onLine
@@ -16,7 +18,7 @@ module.exports = class Utils
     return array
 
 
-  # Mock localForage
+  # Temporary used for debugging, (-> use localForage)
   @store = {}
   @store.getItem = (key) ->
     value = localStorage.getItem(key)

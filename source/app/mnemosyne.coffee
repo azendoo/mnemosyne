@@ -415,6 +415,7 @@ module.exports = class Mnemosyne
 
     return deferred
 
+  # Export sync machine
   @SyncMachine = SyncMachine
 
 

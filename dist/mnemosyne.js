@@ -24,8 +24,10 @@ removeValue = function(ctx, key) {
 };
 
 dbSync = function(ctx) {
-  localStorage.setItem(ctx.key + '.orderedKeys', JSON.stringify(ctx.orderedKeys));
-  return localStorage.setItem(ctx.key + '.dict', JSON.stringify(ctx.dict));
+  return _.defer(function() {
+    localStorage.setItem(ctx.key + '.orderedKeys', JSON.stringify(ctx.orderedKeys));
+    return localStorage.setItem(ctx.key + '.dict', JSON.stringify(ctx.dict));
+  });
 };
 
 DEFAULT_STORAGE_KEY = 'mnemosyne.pendingRequests';
@@ -66,6 +68,10 @@ module.exports = MagicQueue = (function() {
     return this.dict[this.orderedKeys[0]];
   };
 
+  MagicQueue.prototype.getItem = function(key) {
+    return this.dict[key] || null;
+  };
+
   MagicQueue.prototype.rotate = function() {
     if (this.orderedKeys.length < 1) {
       return;
@@ -97,41 +103,32 @@ module.exports = MagicQueue = (function() {
 
   MagicQueue.prototype.retrieveItem = function(key) {
     var indexKey, value;
-    indexKey = this.orderedKeys.indexOf(key);
-    if (indexKey === -1) {
+    if (this.dict[key] == null) {
       return null;
     }
+    indexKey = this.orderedKeys.indexOf(key);
     this.orderedKeys.splice(indexKey, 1);
     value = removeValue(this, key);
     dbSync(this);
     return value;
   };
 
-  MagicQueue.prototype.getItem = function(key) {
-    return this.dict[key] || null;
+  MagicQueue.prototype.isEmpty = function() {
+    return this.orderedKeys.length === 0;
   };
 
-  MagicQueue.prototype.isEmpty = function() {
-    return this.getQueue().length === 0;
+  MagicQueue.prototype.getQueue = function() {
+    return _.map(this.orderedKeys, (function(_this) {
+      return function(key) {
+        return _this.dict[key];
+      };
+    })(this));
   };
 
   MagicQueue.prototype.clear = function() {
     this.orderedKeys = [];
     this.dict = {};
     return dbSync(this);
-  };
-
-  MagicQueue.prototype.getQueue = function() {
-    var key, queue, _i, _len, _ref;
-    queue = [];
-    _ref = this.orderedKeys;
-    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-      key = _ref[_i];
-      if ((this.dict[key] != null) && !this.dict[key].removed) {
-        queue.push(this.dict[key]);
-      }
-    }
-    return queue;
   };
 
   return MagicQueue;
@@ -146,7 +143,7 @@ module.exports = Utils = (function() {
   function Utils() {}
 
   Utils.isConnected = function() {
-    if (window.device) {
+    if (window.device && (window.navigator.connection != null)) {
       return window.navigator.connection.type !== Connection.NONE;
     } else {
       return window.navigator.onLine;
@@ -196,7 +193,7 @@ module.exports = Utils = (function() {
 
 });
 
-define('../app/request_manager',['require','exports','module','../app/magic_queue','../app/utils'],function (require, exports, module) {var MAX_INTERVAL, MIN_INTERVAL, MagicQueue, RequestManager, Utils, clearTimer, consume, defaultCallbacks, getMethod, isRequestEmpty, pushRequest, removeMethod, smartRequest;
+define('../app/request_manager',['require','exports','module','../app/magic_queue','../app/utils'],function (require, exports, module) {var MAX_INTERVAL, MIN_INTERVAL, MagicQueue, RequestManager, Utils, clearTimer, consumeRequests, defaultCallbacks, enqueueRequest, getMethod, initRequest, isRequestEmpty, onSendFail, onSendSuccess, optimizeRequest, sendRequest;
 
 MagicQueue = require("../app/magic_queue");
 
@@ -206,137 +203,6 @@ MAX_INTERVAL = 2000;
 
 MIN_INTERVAL = 125;
 
-clearTimer = function(ctx) {
-  clearTimeout(ctx.timeout);
-  ctx.timeout = null;
-  return ctx.interval = MIN_INTERVAL;
-};
-
-pushRequest = function(ctx, request) {
-  var deferred, method, options, pendingId;
-  deferred = $.Deferred();
-  ctx.pendingRequests.addTail(request.key, request);
-  method = getMethod(request);
-  options = request.methods[method];
-  pendingId = request.model.get('_pending_id');
-  if (pendingId != null) {
-    console.warn("[pushRequest] -- pendingId already set!!");
-  }
-  if (!Utils.isConnected()) {
-    if (!request.model.cache.enabled) {
-      console.log('[pushRequest] -- not connected. Not queued because of cache disabled');
-      ctx.callbacks.onCancelled(request.model);
-      return deferred.reject();
-    }
-    console.log('[pushRequest] -- not connected. Push request in queue');
-    request.model.attributes['_pending_id'] = new Date().getTime();
-    ctx.callbacks.onPending(request.model);
-    if (ctx.timeout == null) {
-      consume(ctx);
-    }
-    return deferred.resolve(request.model.attributes);
-  }
-  console.log('[pushRequest] -- Try sync');
-  Backbone.sync(method, request.model, options).done(function(value) {
-    console.log('[pushRequest] -- Sync success');
-    removeMethod(request, method);
-    if (isRequestEmpty(request)) {
-      ctx.pendingRequests.retrieveItem(request.key);
-      ctx.callbacks.onSynced(request.model, value, method);
-      return deferred.resolve.apply(this, arguments);
-    }
-  }).fail(function(error) {
-    console.log('[pushRequest] -- Sync failed');
-    if (!request.model.cache.enabled) {
-      console.log('[pushRequest] -- sync fail. Not queued because of cache disabled');
-      ctx.callbacks.onCancelled(request.model);
-      return deferred.reject();
-    }
-    request.model.attributes['_pending_id'] = new Date().getTime();
-    ctx.callbacks.onPending(request.model);
-    deferred.resolve(request.model.attributes);
-    if (ctx.timeout == null) {
-      return consume(ctx);
-    }
-  });
-  return deferred;
-};
-
-consume = function(ctx) {
-  var method, options, pendingId, request;
-  request = ctx.pendingRequests.getHead();
-  if (request == null) {
-    console.log('[consume] -- done! 0 pending');
-    clearTimer(ctx);
-    return;
-  }
-  if (!Utils.isConnected()) {
-    if (ctx.interval < MAX_INTERVAL) {
-      ctx.interval = ctx.interval * 2;
-    }
-    console.log('[consume] -- not connected, next try in ', ctx.interval);
-    return ctx.timeout = setTimeout((function() {
-      return consume(ctx);
-    }), ctx.interval);
-  }
-  method = getMethod(request);
-  options = request.methods[method];
-  pendingId = request.model.get('_pending_id');
-  delete request.model.attributes._pending_id;
-  console.log('[consume] -- try sync ', method);
-  return Backbone.sync(method, request.model, options).done(function(value) {
-    console.log('[consume] -- Sync success');
-    request.model.attributes._pending_id = pendingId;
-    removeMethod(request, method);
-    if (isRequestEmpty(request)) {
-      ctx.pendingRequests.retrieveHead();
-      ctx.callbacks.onSynced(request.model, value, method);
-    }
-    return ctx.interval = MIN_INTERVAL;
-  }).fail(function(error) {
-    var status;
-    console.log('[consume] -- Sync failed', error);
-    status = error.readyState;
-    switch (status) {
-      case 4:
-      case 5:
-        ctx.pendingRequests.retrieveHead();
-        ctx.callbacks.onCancelled(request.model);
-        break;
-      default:
-        request.model.attributes._pending_id = pendingId;
-        ctx.pendingRequests.rotate();
-    }
-    if (ctx.interval < MAX_INTERVAL) {
-      return ctx.interval = ctx.interval * 2;
-    }
-  }).always(function() {
-    return ctx.timeout = setTimeout((function() {
-      return consume(ctx);
-    }), ctx.interval);
-  });
-};
-
-smartRequest = function(ctx, request) {
-  if ((request.methods['delete'] != null) && (request.methods['create'] != null)) {
-    ctx.pendingRequests.retrieveItem(request.key);
-    return null;
-  }
-  if (((request.methods['create'] != null) || (request.methods['delete'] != null)) && (request.methods['update'] != null)) {
-    delete request.methods['update'];
-    return request;
-  }
-  return request;
-};
-
-removeMethod = function(request, method) {
-  return delete request.methods[method];
-};
-
-isRequestEmpty = function(request) {
-  return Object.keys(request.methods).length === 0;
-};
-
 getMethod = function(request) {
   if (request.methods['create']) {
     return 'create';
@@ -345,8 +211,143 @@ getMethod = function(request) {
   } else if (request.methods['delete']) {
     return 'delete';
   } else {
-    return console.error("No method found !", request);
+    return null;
   }
+};
+
+isRequestEmpty = function(request) {
+  return Object.keys(request.methods).length === 0;
+};
+
+initRequest = function(ctx, method, model, options) {
+  var pendingId, request;
+  request = ctx.pendingRequests.getItem(model.getKey()) || {
+    "methods": {}
+  };
+  request.model = model;
+  request.key = model.getKey();
+  request.url = _.result(model, 'url');
+  request.parentKeys = model.getParentKeys();
+  request.methods[method] = options;
+  pendingId = request.model.get('pending_id');
+  if (pendingId == null) {
+    request.model.set('pending_id', new Date().getTime());
+  }
+  if (request.deferred == null) {
+    request.deferred = $.Deferred();
+  }
+  return optimizeRequest(ctx, request);
+};
+
+clearTimer = function(ctx) {
+  clearTimeout(ctx.timeout);
+  ctx.timeout = null;
+  return ctx.interval = MIN_INTERVAL;
+};
+
+enqueueRequest = function(ctx, request) {
+  ctx.pendingRequests.addTail(request.key, request);
+  if (ctx.timeout === null) {
+    return consumeRequests(ctx);
+  }
+};
+
+consumeRequests = function(ctx) {
+  var request;
+  request = ctx.pendingRequests.getHead();
+  if (request == null) {
+    clearTimer(ctx);
+    return;
+  }
+  return ctx.timeout = setTimeout(function() {
+    return sendRequest(ctx, request);
+  }, ctx.interval);
+};
+
+onSendFail = function(ctx, request, error) {
+  var status, _ref, _ref1, _ref2;
+  if (ctx.interval < MAX_INTERVAL) {
+    ctx.interval = ctx.interval * 2;
+  }
+  if (request.model.cache.enabled) {
+    status = error.readyState;
+    switch (status) {
+      case 4:
+      case 5:
+        ctx.callbacks.onCancelled(request.model);
+        console.log('rejected -- ', status);
+        if ((_ref = request.deferred) != null) {
+          _ref.reject();
+        }
+        break;
+      default:
+        enqueueRequest(ctx, request);
+        ctx.callbacks.onPending(request.model);
+        if ((_ref1 = request.deferred) != null) {
+          _ref1.resolve(request.model.attributes);
+        }
+    }
+  } else {
+    ctx.callbacks.onCancelled(request.model);
+    if ((_ref2 = request.deferred) != null) {
+      _ref2.reject();
+    }
+  }
+  return consumeRequests(ctx);
+};
+
+onSendSuccess = function(ctx, request, method, value) {
+  delete request.methods[method];
+  ctx.interval = MIN_INTERVAL;
+  if (isRequestEmpty(request)) {
+    ctx.pendingRequests.retrieveItem(request.key);
+    ctx.callbacks.onSynced(request.model, value, method);
+  } else {
+    enqueueRequest(ctx, ctx.pendingRequests.retrieveItem(request.key));
+  }
+  return consumeRequests(ctx);
+};
+
+sendRequest = function(ctx, request) {
+  var deferred, method, options, pendingId;
+  deferred = request.deferred;
+  if (!Utils.isConnected()) {
+    onSendFail(ctx, request, 0);
+    return;
+  } else {
+    pendingId = request.model.attributes["_pending_id"];
+    delete request.model.attributes["_pending_id"];
+    method = getMethod(request);
+    if (method == null) {
+      onSendSuccess(ctx, request, method);
+      if (isRequestEmpty(request)) {
+        return deferred != null ? deferred.resolve.apply(this, arguments) : void 0;
+      }
+    }
+    options = request.methods[method];
+    Backbone.sync(method, request.model, options).done(function(value) {
+      onSendSuccess(ctx, request, method, value);
+      if (isRequestEmpty(request)) {
+        return deferred != null ? deferred.resolve.apply(this, arguments) : void 0;
+      }
+    }).fail(function(error) {
+      request.model.attributes["_pending_id"] = pendingId;
+      return onSendFail(ctx, request, error);
+    });
+  }
+  return deferred;
+};
+
+optimizeRequest = function(ctx, request) {
+  if ((request.methods['delete'] != null) && (request.methods['create'] != null)) {
+    request.methods = {};
+    return request;
+  }
+  if (((request.methods['create'] != null) || (request.methods['delete'] != null)) && (request.methods['update'] != null)) {
+    delete request.methods['update'];
+    return request;
+  }
+  return request;
 };
 
 defaultCallbacks = {
@@ -377,29 +378,13 @@ module.exports = RequestManager = (function() {
     this.retrySync();
   }
 
-  RequestManager.prototype.clear = function() {
-    var e;
-    clearTimer(this);
-    try {
-      this.pendingRequests.getQueue().map((function(_this) {
-        return function(request) {
-          return _this.callbacks.onCancelled(request.model);
-        };
-      })(this));
-    } catch (_error) {
-      e = _error;
-      console.warn("Bad content found into mnemosyne magic queue");
-    }
-    return this.pendingRequests.clear();
-  };
-
   RequestManager.prototype.getPendingRequests = function() {
     return this.pendingRequests.getQueue();
   };
 
   RequestManager.prototype.retrySync = function() {
     clearTimer(this);
-    return consume(this);
+    return consumeRequests(this);
   };
 
   RequestManager.prototype.cancelPendingRequest = function(key) {
@@ -411,32 +396,30 @@ module.exports = RequestManager = (function() {
     return this.callbacks.onCancelled(request.model);
   };
 
+  RequestManager.prototype.clear = function() {
+    var e, request, _i, _len, _ref;
+    clearTimer(this);
+    try {
+      _ref = this.pendingRequests.getQueue();
+      for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+        request = _ref[_i];
+        this.callbacks.onCancelled(request.model);
+      }
+    } catch (_error) {
+      e = _error;
+      console.warn("Bad content found into mnemosyne magic queue", e);
+    }
+    return this.pendingRequests.clear();
+  };
+
   RequestManager.prototype.sync = function(method, model, options) {
-    var deferred, request;
+    var request;
     if (options == null) {
       options = {};
     }
-    model.beginSync();
-    request = this.pendingRequests.getItem(model.getKey());
-    if (request == null) {
-      request = {};
-    }
-    if (request.methods == null) {
-      request.methods = {};
-    }
-    request.model = model;
-    request.methods[method] = options;
-    request.key = model.getKey();
-    request.parentKeys = model.getParentKeys();
-    request.url = _.result(model, 'url');
-    request = smartRequest(this, request);
-    if (request == null) {
-      deferred = $.Deferred();
-      deferred.resolve();
-      this.callbacks.onSynced(model);
-      return deferred;
-    }
-    return pushRequest(this, request);
+    request = initRequest(this, method, model, options);
+    enqueueRequest(this, request);
+    return request.deferred;
   };
 
   return RequestManager;
@@ -555,7 +538,7 @@ Utils = require("../app/utils");
 
 
 /*
-  Manage the connection, provide callbacks on connection lost and recovered
+  Watch the connection, providing callbacks on connection lost and recovered
  */
 
 module.exports = ConnectionManager = (function() {
@@ -620,7 +603,7 @@ module.exports = ConnectionManager = (function() {
       case 'connectionRecovered':
         return delete this._connectionRecoveredCallbacks[key];
       default:
-        return console.warn('No callback for ', event);
+        return console.warn('No callback registered for ', event);
     }
   };
 
@@ -688,7 +671,6 @@ serverRead = function(ctx, model, options, fallbackItem, deferred) {
   console.log("Sync from server");
   if ((fallbackItem != null) && model.cache.allowExpiredCache && !options.forceRefresh) {
     deferred.resolve(fallbackItem);
-    options.silent = true;
   }
   if (!Utils.isConnected()) {
     console.log('No connection');

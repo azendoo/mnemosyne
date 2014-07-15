@@ -118,6 +118,7 @@ module.exports = describe 'Request Manager specifications', ->
   ###
   describe 'Online', ->
     beforeEach ->
+      model1.beginSync()
       serverAutoRespondOk()
 
     ###
@@ -161,6 +162,7 @@ module.exports = describe 'Request Manager specifications', ->
   ###
   describe 'Offline', ->
     beforeEach ->
+      model1.beginSync()
       serverAutoRespondError()
     ###
                 OFFLINE - CACHE enabled
@@ -176,6 +178,7 @@ module.exports = describe 'Request Manager specifications', ->
           done()
 
       it 'should trigger "pending" event on model', (done) ->
+        model1.beginSync()
         model1.on "pending", -> done()
         requestManager.sync('update', model1)
 
@@ -221,6 +224,10 @@ module.exports = describe 'Request Manager specifications', ->
         it 'should cancel all pending requests', (done) ->
           nbPendingRequests = requestManager.getPendingRequests().length
           expect(nbPendingRequests).to.be.equal(0)
+
+          model1.beginSync()
+          model2.beginSync()
+          model3.beginSync()
 
           serverAutoRespondError()
           $.when(
