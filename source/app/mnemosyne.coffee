@@ -377,9 +377,9 @@ module.exports = class Mnemosyne
 
 
   ###
-    Allow you to unregister a callback for a given event-key
+    Allow you to unregister a callback for a given key
   ###
-  unsubscribe: (event, key) ->
+  unsubscribe: (key) ->
     _context._connectionManager.unsubscribe(event, key)
 
 

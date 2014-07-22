@@ -46,13 +46,8 @@ module.exports = class  ConnectionManager
       else
         console.warn 'No callback for ', event
 
-  unsubscribe: (event, key) ->
-    switch event
-      when 'connectionLost'
-        delete @_connectionLostCallbacks[key]
-      when 'connectionRecovered'
-        delete @_connectionRecoveredCallbacks[key]
-      else
-        console.warn 'No callback registered for ', event
+  unsubscribe: (key) ->
+    delete @_connectionLostCallbacks[key]
+    delete @_connectionRecoveredCallbacks[key]
 
   isOnline: -> Utils.isConnected()
