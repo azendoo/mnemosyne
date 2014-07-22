@@ -68,7 +68,7 @@ consumeRequests = (ctx) ->
     ctx.interval)
 
 
-onSendFail = (ctx, request, error) ->
+onSendFail = (ctx, request, method, error) ->
   if ctx.interval < MAX_INTERVAL
     ctx.interval = ctx.interval * 2
 
@@ -82,7 +82,7 @@ onSendFail = (ctx, request, error) ->
     #     request.deferred?.reject()
     #   else
     enqueueRequest(ctx, request)
-    ctx.callbacks.onPending(request.model)
+    ctx.callbacks.onPending(request.model, method)
     request.deferred?.resolve(request.model.attributes)
   else
     ctx.callbacks.onCancelled(request.model)
@@ -96,7 +96,7 @@ onSendSuccess = (ctx, request, method, value) ->
   ctx.interval = MIN_INTERVAL
   if isRequestEmpty(request)
     ctx.pendingRequests.retrieveItem(request.key)
-    ctx.callbacks.onSynced(request.model, value, method)
+    ctx.callbacks.onSynced(request.model, method, value)
   else
     enqueueRequest(ctx, ctx.pendingRequests.retrieveItem(request.key))
   consumeRequests(ctx)
@@ -105,9 +105,10 @@ onSendSuccess = (ctx, request, method, value) ->
 # Try to send request, if fail, push in queue and try again later
 sendRequest = (ctx, request) ->
   deferred = request.deferred
+  method  = getMethod(request)
 
   if not Utils.isConnected()
-    onSendFail(ctx, request, 0)
+    onSendFail(ctx, request, method, 0)
     return
 
   else
@@ -115,7 +116,6 @@ sendRequest = (ctx, request) ->
     pendingId = request.model.attributes["_pending_id"]
     delete request.model.attributes["_pending_id"]
 
-    method  = getMethod(request)
     if not method?
       onSendSuccess(ctx, request, method)
       return deferred?.resolve.apply(this, arguments) if isRequestEmpty(request)
@@ -129,7 +129,7 @@ sendRequest = (ctx, request) ->
 
     .fail (error) ->
       request.model.attributes["_pending_id"] = pendingId
-      onSendFail(ctx, request, error)
+      onSendFail(ctx, request, method, error)
 
   return deferred
 

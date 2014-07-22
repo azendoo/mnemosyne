@@ -18,17 +18,29 @@ module.exports = describe 'Mnemosyne specifications', ->
     server.respondWith (xhr) ->
       serverSpy.call()
       switch xhr.url
-        when '/model'
+        when '/model/1'
           xhr.respond(
             statusCode
             "Content-Type": "application/json"
             '{"id": 1, "name":"serverModel1"}'
+          )
+        when '/model/2'
+          xhr.respond(
+            statusCode
+            "Content-Type": "application/json"
+            '{"id": 2, "name":"serverModel2"}'
           )
         when '/collection'
           xhr.respond(
             statusCode
             "Content-Type": "application/json"
             '[{"id": 1, "name":"serverModel1"}, {"id": 2, "name":"serverModel2"}]'
+          )
+        else
+          xhr.respond(
+            statusCode
+            "Content-Type": "application/json"
+            '{"id": 3, "name":"serverNewModel3"}'
           )
 
 
@@ -46,7 +58,7 @@ module.exports = describe 'Mnemosyne specifications', ->
       getParentKeys: -> ['parentKey1', 'parentKey2']
       getName: -> @get('name')
       setName: (value) -> @set('name', value)
-      url: -> '/model'
+      url: -> "/model/#{@get('id')}"
 
     class CustomCollection extends Backbone.Collection
       model: CustomModel
@@ -65,6 +77,7 @@ module.exports = describe 'Mnemosyne specifications', ->
     model = new CustomModel(id:1)
     model2 = new CustomModel(id:2)
     model2.getKey = -> 'modelKey2'
+    model2.setName('model2')
     newModel = new CustomModel()
     newModel.getKey = -> 'newModelKey'
     collection = new CustomCollection()
@@ -183,7 +196,7 @@ module.exports = describe 'Mnemosyne specifications', ->
                     expect(value[0].name).to.equal('serverModel1')
                     done()
 
-      it 'should add the model to the cache of the parent collection if the model is not new', (done) ->
+      it 'should add the model to the cache of the parent collection', (done) ->
         collection.push(model)
         mnemosyne.cacheWrite(collection).done ->
           mnemosyne.cacheRead(collection)
@@ -487,23 +500,6 @@ module.exports = describe 'Mnemosyne specifications', ->
 
         newModel.save()
 
-      it 'should add the new model to all offline parent collection', (done) ->
-        newModel.getParentKeys= -> ['parentKey1', 'parentKey2']
-        newModel.setName('offline model')
-        newModel.on 'pending', ->
-          for parentKey in newModel.getParentKeys()
-            expect(mnemosyne._offlineCollections[parentKey].length).equals(1)
-          done()
-
-        newModel.save()
-
-      it 'should add the pending model to the fetched collection', (done) ->
-        expect(collection.models).to.be.empty
-        mnemosyne._offlineCollections[collection.getKey()] = [newModel]
-        collection.fetch().always ->
-          expect(collection.models).not.be.empty
-          done()
-
       it 'should remove the model from the cache of all parent collection', (done) ->
         model.setName('offline model')
 
@@ -520,21 +516,6 @@ module.exports = describe 'Mnemosyne specifications', ->
                     done()
 
               model.destroy()
-
-
-
-      it 'should remove the new model from all offline parent collection', (done) ->
-        newModel.getParentKeys= -> ['parentKey1', 'parentKey2']
-        newModel.setName('offline model')
-        newModel.on 'pending', ->
-          newModel.destroy()
-
-        newModel.on 'synced', ->
-          for parentKey in newModel.getParentKeys()
-            expect(mnemosyne._offlineCollections[parentKey]).to.be.empty
-          done()
-
-        newModel.save()
 
     it 'should trigger "syncing" event on model', (done) ->
       model.on 'syncing', -> done()

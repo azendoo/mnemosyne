@@ -103,15 +103,9 @@ module.exports = describe 'Request Manager specifications', ->
         requestManager.sync('create', model2),
         requestManager.sync('create', model3)
       ).done ->
-        requestManager = new RequestManager()
-        expect(requestManager.getPendingRequests().length).to.equal(3)
-        setTimeout(
-          ->
-            expect(requestManager.interval).to.be.above(125)
-            done()
-          250
-        )
-
+        reqManager = new RequestManager()
+        expect(reqManager.getPendingRequests().length).to.equal(3)
+        done()
 
   ###
               +++++ ONLINE +++++
