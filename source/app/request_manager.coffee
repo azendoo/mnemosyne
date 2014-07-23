@@ -38,8 +38,8 @@ initRequest = (ctx, method, model, options) ->
   request.cache   = model.cache
   request.parentKeys      = model.getParentKeys()
   request.methods[method] = options
-  pendingId = request.model.get('pending_id')
-  request.model.set('pending_id', new Date().getTime()) if not pendingId?
+  pendingId = request.model.attributes['pending_id']
+  request.model.attributes['pending_id'] = new Date().getTime() if (not pendingId? and not model.get('id'))
   request.deferred ?= $.Deferred()
   return optimizeRequest(ctx, request)
 
@@ -113,8 +113,8 @@ sendRequest = (ctx, request) ->
 
   else
     # Save and clean pending id before sync
-    pendingId = request.model.attributes["_pending_id"]
-    delete request.model.attributes["_pending_id"]
+    pendingId = request.model.attributes["pending_id"]
+    delete request.model.attributes["pending_id"]
 
     if not method?
       onSendSuccess(ctx, request, method)
@@ -124,11 +124,12 @@ sendRequest = (ctx, request) ->
 
     Backbone.sync(method, request.model, options)
     .done (value) ->
+      request.model.attributes["pending_id"] = pendingId
       onSendSuccess(ctx, request, method, value)
       deferred?.resolve.apply(this, arguments) if isRequestEmpty(request)
 
     .fail (error) ->
-      request.model.attributes["_pending_id"] = pendingId
+      request.model.attributes["pending_id"] = pendingId
       onSendFail(ctx, request, method, error)
 
   return deferred

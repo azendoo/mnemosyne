@@ -82,7 +82,7 @@ serverRead = (ctx, model, options, deferred) ->
   Backbone.sync('read', model, options)
   .done (value)->
     console.log "Succeed sync from server"
-    updateCache(ctx, model, value).always -> deferred.resolve(value)
+    addToCache(ctx, model, value).always -> deferred.resolve(value)
 
   .fail (error) ->
     console.log "Fail sync from server"
@@ -96,7 +96,10 @@ removeFromCollectionCache = (ctx, collectionKey, model) ->
   Utils.store.getItem(collectionKey)
   .done (value) ->
     models = value.data
-    models = _.filter(models, (m) -> m.id isnt model.get('id'))
+    if model.get('pending_id')
+      models = _.filter(models, (m) -> m.pending_id isnt model.get('pending_id'))
+    else
+      models = _.filter(models, (m) -> m.id isnt model.get('id'))
     Utils.store.setItem(collectionKey, {"data" : models, "expirationDate" : value.expirationDate})
     .done -> deferred.resolve()
     .fail -> onDataBaseError(ctx)
@@ -143,7 +146,11 @@ updateCollectionCache = (ctx, collectionKey, model) ->
   Utils.store.getItem(collectionKey)
   .done (value) ->
     models = value.data
-    parentModel = _.findWhere(models, "id": model.get('id'))
+    if model.get('pending_id')
+      parentModel = _.findWhere(models, "pending_id": model.get('pending_id'))
+    else
+      parentModel = _.findWhere(models, "id": model.get('id'))
+
     if parentModel?
       # Update the model
       _.extend(parentModel, model.attributes)
@@ -190,45 +197,33 @@ updateParentsCache = (ctx, model) ->
 
 
 # Update / add the model to cache and parents collections
-updateCache = (ctx, model, data) ->
-
+addToCache = (ctx, model, data) ->
   deferred = $.Deferred()
   return deferred.resolve() if not model.cache.enabled
 
   expiredDate = (new Date()).getTime() + model.cache.ttl * 1000
 
-  if model instanceof Backbone.Model and not model.get('id')?
-    ctx._offlineModels = Utils.addWithoutDuplicates(ctx._offlineModels, model)
-    updateParentsCache(ctx, model).always -> deferred.resolve()
+  if model instanceof Backbone.Model
+    data ?= model.attributes
+
+  else if model instanceof Backbone.Collection
+    data ?= _.map(model.models, (m) -> m.attributes)
+
   else
-    if model instanceof Backbone.Model
-      data ?= model.attributes
+    console.warn "Wrong instance for ", model
+    return deferred.reject()
 
-    else if model instanceof Backbone.Collection
-      data ?= _.map(model.models, (m) -> m.attributes)
-
-    else
-      console.warn "Wrong instance for ", model
-      return deferred.reject()
-
-    Utils.store.setItem(model.getKey(), {"data" : data, "expirationDate": expiredDate})
-    .done ->
-      console.log "Succeed cache write"
-      updateParentsCache(ctx, model)
-      .always ->
-        deferred.resolve()
-    .fail ->
-      wipeCache(ctx)
-      deferred.reject()
-
+  Utils.store.setItem(model.getKey(), {"data" : data, "expirationDate": expiredDate})
+  .done ->
+    console.log "Succeed cache write"
+    updateParentsCache(ctx, model)
+    .always ->
+      deferred.resolve()
+  .fail ->
+    wipeCache(ctx)
+    deferred.reject()
 
   return deferred
-
-
-# Remove the model from offlines models
-removePendingModel = (ctx, model) ->
-  return if not model instanceof Backbone.Model
-  ctx._offlineModels = _.filter(ctx._offlineModels, (m) -> m.get('_pending_id') isnt model.get('_pending_id'))
 
 
 ###
@@ -248,9 +243,6 @@ module.exports = class Mnemosyne
   _requestManager: null
   _connectionManager: null
 
-  # Contains all offlines models
-  _offlineModels: []
-
   _context = null
   constructor: (options={}) ->
     @protectedKeys = options.protectedKeys or []
@@ -258,29 +250,28 @@ module.exports = class Mnemosyne
     @_requestManager    = new RequestManager
       onSynced  : (model, method, value) ->
         return if model.isSynced()
-        if method isnt 'delete'
-          updateCache(_context, model, value)
+        # Remove the pending model
+        if method is 'create'
+          removeFromCache(_context, model).always ->
+            delete model.attributes['pending_id'] if model instanceof Backbone.Model
 
-        # Remove the model from offline models and collection
-        removePendingModel(_context, model)
+        if method isnt 'delete'
+          addToCache(_context, model, value)
+
         model.finishSync()
 
       onPending  : (model, method) ->
         return if model.isPending()
         if method isnt 'delete'
-          updateCache(_context, model)
-
-        # Add the model to offline models
-        if not model.get('id')?
-          _context._offlineModels = Utils.addWithoutDuplicates(_context._offlineModels, model)
+          addToCache(_context, model)
 
         model.pendingSync()
 
       onCancelled : (model) ->
         return if model.isUnsynced()
-        if model instanceof Backbone.Model
+        if model instanceof Backbone.Model and not model.get('id')
           # Remove the model from offline models and collection
-          removePendingModel(_context, model)
+          removeFromCache(_context, model)
 
         model.unsync()
 
@@ -297,7 +288,7 @@ module.exports = class Mnemosyne
     if key instanceof Backbone.Model or key instanceof Backbone.Collection
       model = key
       model.cache = _.defaults(model.cache or {}, defaultCacheOptions)
-      return updateCache(_context, model)
+      return addToCache(_context, model)
     return Utils.store.setItem(key, value)
 
 
@@ -368,7 +359,6 @@ module.exports = class Mnemosyne
     Cancel all pending requests
   ###
   cancelAllPendingRequests: ->
-    _context._offlineModels = []
     _context._requestManager.clear()
 
 
@@ -395,7 +385,6 @@ module.exports = class Mnemosyne
           model.unsync()
 
       when 'delete'
-        removePendingModel(_context, model)
         removeFromCache(_context, model)
         deferred = _context._requestManager.sync(method, model, options)
 
@@ -433,7 +422,7 @@ module.exports = class Mnemosyne
 class MnemosyneModel
 
   getPendingId: ->
-    return @get('_pending_id')
+    return @get('pending_id')
 
   getParentKeys: -> []
 

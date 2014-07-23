@@ -513,30 +513,6 @@ module.exports = describe 'Mnemosyne specifications', ->
 
     describe 'Cache invalidation', ->
 
-      it 'should remove the model from pendings models'
-        # expect(mnemosyne._offlineModels).to.be.empty
-        # pending = false
-        # newModel.on 'pending', ->
-        #   expect(mnemosyne._offlineModels).not.be.empty
-        #   pending = true
-        #   serverAutoRespondOk()
-        #
-        # newModel.on 'synced', ->
-        #   expect(pending).to.be.true
-        #   expect(mnemosyne._offlineModels).to.be.empty
-        #   done()
-        #
-        # newModel.setName('defaultName')
-        # newModel.save()
-
-      it 'should add the new model to offlineModels', (done) ->
-        newModel.setName('offline model')
-        newModel.on 'pending', ->
-          expect(mnemosyne._offlineModels.length).equals(1)
-          done()
-
-        newModel.save()
-
       it 'should remove the model from the cache of all parent collection', (done) ->
         model.setName('offline model')
 
@@ -718,12 +694,6 @@ module.exports = describe 'Mnemosyne specifications', ->
           model.save().done ->
             mnemosyne.cacheRead(model).done (value) ->
               expect(value.name).to.equal("awesome")
-              done()
-
-        it 'should not write the data in cache when saving a model without an id', (done) ->
-          newModel.setName("noCache")
-          newModel.save().done ->
-            mnemosyne.cacheRead(newModel).fail ->
               done()
 
         it 'should push the request in the queue', (done) ->
