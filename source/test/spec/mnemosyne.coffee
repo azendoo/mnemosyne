@@ -83,13 +83,13 @@ module.exports = describe 'Mnemosyne specifications', ->
     collection = new CustomCollection()
     collection2 = new CustomCollection()
     collection2.getKey = ->'parentKey2'
-    mnemosyne.clear()
+    mnemosyne.cacheClear()
 
 
 
   afterEach ->
     server.restore()
-    mnemosyne.clear()
+    mnemosyne.cacheClear()
 
 
   serverAutoRespondError = ->
@@ -106,6 +106,23 @@ module.exports = describe 'Mnemosyne specifications', ->
   describe 'Online', ->
     beforeEach ->
       serverAutoRespondOk()
+
+    describe 'Cache wipe', ->
+      it 'should clean the cache but preserve protected keys', (done) ->
+        mnemosyne = new Mnemosyne({protectedKeys: ['key1', 'key2', 'key3']})
+        $.when(
+          mnemosyne.cacheWrite('key1', 'some random text'),
+          mnemosyne.cacheWrite('key2', 'some random text'),
+          mnemosyne.cacheWrite('key3', 'some random text'),
+          mnemosyne.cacheWrite('key4', 'some random text'),
+          mnemosyne.cacheWrite('key5', 'some random text')
+        ).done ->
+          mnemosyne.cacheClear().done ->
+            mnemosyne.cacheRead('key1').done (value) ->
+              expect(value).to.exists
+              mnemosyne.cacheRead('key5').fail ->
+                done()
+
 
     describe 'Cache invalidation', ->
 

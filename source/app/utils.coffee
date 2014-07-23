@@ -18,7 +18,7 @@ module.exports = class Utils
     return array
 
 
-  # Temporary used for debugging, (-> use localForage)
+  # Temporary use localStorage for easy debugging, (-> use localForage)
   @store = {}
   @store.getItem = (key) ->
     value = localStorage.getItem(key)
@@ -28,7 +28,10 @@ module.exports = class Utils
 
 
   @store.setItem = (key, value) ->
-    localStorage.setItem(key, JSON.stringify(value))
+    try
+      localStorage.setItem(key, JSON.stringify(value))
+    catch e
+      return $.Deferred().reject()
     return $.Deferred().resolve()
 
 

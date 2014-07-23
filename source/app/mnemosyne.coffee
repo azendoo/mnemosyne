@@ -6,6 +6,34 @@ ConnectionManager = require "../app/connection_manager"
 # _        = require "underscore"
 
 
+# Empty the database saving and restoring protected keys list
+wipeCache= (ctx) ->
+  deferred = $.Deferred()
+  backup = []
+  deferredArray = _.map(ctx.protectedKeys, (protectedKey) ->
+    deferred = $.Deferred()
+    Utils.store.getItem(protectedKey)
+    .done (val) ->
+      backup.push({value: val, key: protectedKey})
+    .always ->
+      deferred.resolve()
+    return deferred
+    )
+  $.when(deferredArray).then(
+    ->
+      Utils.store.clear()
+      .done ->
+        for val in backup
+          Utils.store.setItem(val.key, val.value)
+        deferred.resolve()
+      .fail ->
+        console.error 'Fail to clear cache'
+        deferred.reject()
+
+  )
+  return deferred
+
+
 # Read the value from cache / server depending on conditions
 read = (ctx, model, options) ->
   deferred = $.Deferred()
@@ -70,8 +98,8 @@ removeFromCollectionCache = (ctx, collectionKey, model) ->
     models = value.data
     models = _.filter(models, (m) -> m.id isnt model.get('id'))
     Utils.store.setItem(collectionKey, {"data" : models, "expirationDate" : value.expirationDate})
-    .always ->
-      deferred.resolve()
+    .done -> deferred.resolve()
+    .fail -> onDataBaseError(ctx)
   .fail ->
     # The model doesn't exist
     deferred.resolve()
@@ -123,14 +151,16 @@ updateCollectionCache = (ctx, collectionKey, model) ->
       # Add the model
       models.unshift(model.attributes)
     Utils.store.setItem(collectionKey, {"data" : models, "expirationDate": 0})
-    .always ->
-      deferred.resolve()
+    .done -> deferred.resolve()
+    .fail -> wipeCache(ctx)
+
   .fail ->
     # Create the collection in cache and add the model
     Utils.store.setItem(collectionKey, {"data" : [model.attributes], "expirationDate": 0})
     .done ->
       deferred.resolve()
     .fail ->
+      wipeCache(ctx)
       deferred.reject()
 
   return deferred
@@ -183,13 +213,13 @@ updateCache = (ctx, model, data) ->
 
     Utils.store.setItem(model.getKey(), {"data" : data, "expirationDate": expiredDate})
     .done ->
-        console.log "Succeed cache write"
-        updateParentsCache(ctx, model)
-        .always ->
-          deferred.resolve()
+      console.log "Succeed cache write"
+      updateParentsCache(ctx, model)
+      .always ->
+        deferred.resolve()
     .fail ->
-        console.log "fail cache write"
-        deferred.reject()
+      wipeCache(ctx)
+      deferred.reject()
 
 
   return deferred
@@ -222,7 +252,8 @@ module.exports = class Mnemosyne
   _offlineModels: []
 
   _context = null
-  constructor: ->
+  constructor: (options={}) ->
+    @protectedKeys = options.protectedKeys or []
     @_connectionManager = new ConnectionManager()
     @_requestManager    = new RequestManager
       onSynced  : (model, method, value) ->
@@ -305,8 +336,8 @@ module.exports = class Mnemosyne
     return a Deferred
   ###
   cacheClear: ->
-    @clear()
-    return Utils.store.clear();
+    @cancelAllPendingRequests()
+    return wipeCache(_context)
 
 
   ###
@@ -336,7 +367,7 @@ module.exports = class Mnemosyne
   ###
     Cancel all pending requests
   ###
-  clear: ->
+  cancelAllPendingRequests: ->
     _context._offlineModels = []
     _context._requestManager.clear()
 

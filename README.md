@@ -10,7 +10,6 @@ MIT
 
 
 # Mnemosyne documentation (DRAFT)
-
 Mnemosyne overrides **Backbone** `sync` method allowing caching requests.
 
 - `sync(method, model, options)`
@@ -76,7 +75,7 @@ Mnemosyne overrides **Backbone** `sync` method allowing caching requests.
 - `retrySync()`
   Reset the timer and try a new synchronization.
 
-- `clear()`
+- `cancelAllPendingRequests()`
   Clear all pending requests and unsaved models.
 
 - `cancelPendingRequests(key)`
@@ -93,9 +92,20 @@ Mnemosyne overrides **Backbone** `sync` method allowing caching requests.
   You can give a model / collection as only arguments.
 
 - `cacheClear()`
-  Wipe all the cache and call `Mnemosyne.clear` method.
-  ** TODO ** give to Mnemosyne an array of keys to save before wipe and restore
-  after.
+  Wipe all the cache and call `Mnemosyne.cancelAllPendingRequests` method.
+
+  ** Important **
+
+  There is currently no smart cache memory management, and as it is stored in
+  local storage, it is highly probable which one day the cache turn full.
+  In this case, the cache is automatically cleared. However you can choose to
+  keep some key in cache, passing them to Mnemosyne constructor.
+
+  ```javascript
+    mnemosyne = new Mnemosyne({
+      protectedKeys: ['some', 'protected', 'keys']
+    });
+  ```
 
 - `subscribe(event, key, callback)`
   Allow to register callbacks on severals events.

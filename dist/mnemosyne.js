@@ -173,7 +173,13 @@ module.exports = Utils = (function() {
   };
 
   Utils.store.setItem = function(key, value) {
-    localStorage.setItem(key, JSON.stringify(value));
+    var e;
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch (_error) {
+      e = _error;
+      return $.Deferred().reject();
+    }
     return $.Deferred().resolve();
   };
 
@@ -601,7 +607,7 @@ module.exports = ConnectionManager = (function() {
 
 });
 
-define('mnemosyne',['require','exports','module','../app/request_manager','../app/sync_machine','../app/utils','../app/connection_manager'],function (require, exports, module) {var ConnectionManager, Mnemosyne, MnemosyneCollection, MnemosyneModel, RequestManager, SyncMachine, Utils, defaultCacheOptions, defaultOptions, read, removeFromCache, removeFromCollectionCache, removeFromParentsCache, removePendingModel, serverRead, updateCache, updateCollectionCache, updateParentsCache, validCacheValue, _destroy;
+define('mnemosyne',['require','exports','module','../app/request_manager','../app/sync_machine','../app/utils','../app/connection_manager'],function (require, exports, module) {var ConnectionManager, Mnemosyne, MnemosyneCollection, MnemosyneModel, RequestManager, SyncMachine, Utils, defaultCacheOptions, defaultOptions, read, removeFromCache, removeFromCollectionCache, removeFromParentsCache, removePendingModel, serverRead, updateCache, updateCollectionCache, updateParentsCache, validCacheValue, wipeCache, _destroy;
 
 RequestManager = require("../app/request_manager");
 
@@ -610,6 +616,38 @@ SyncMachine = require("../app/sync_machine");
 Utils = require("../app/utils");
 
 ConnectionManager = require("../app/connection_manager");
+
+wipeCache = function(ctx) {
+  var backup, deferred, deferredArray;
+  deferred = $.Deferred();
+  backup = [];
+  deferredArray = _.map(ctx.protectedKeys, function(protectedKey) {
+    deferred = $.Deferred();
+    Utils.store.getItem(protectedKey).done(function(val) {
+      return backup.push({
+        value: val,
+        key: protectedKey
+      });
+    }).always(function() {
+      return deferred.resolve();
+    });
+    return deferred;
+  });
+  $.when(deferredArray).then(function() {
+    return Utils.store.clear().done(function() {
+      var val, _i, _len;
+      for (_i = 0, _len = backup.length; _i < _len; _i++) {
+        val = backup[_i];
+        Utils.store.setItem(val.key, val.value);
+      }
+      return deferred.resolve();
+    }).fail(function() {
+      console.error('Fail to clear cache');
+      return deferred.reject();
+    });
+  });
+  return deferred;
+};
 
 read = function(ctx, model, options) {
   var deferred;
@@ -671,8 +709,10 @@ removeFromCollectionCache = function(ctx, collectionKey, model) {
     return Utils.store.setItem(collectionKey, {
       "data": models,
       "expirationDate": value.expirationDate
-    }).always(function() {
+    }).done(function() {
       return deferred.resolve();
+    }).fail(function() {
+      return onDataBaseError(ctx);
     });
   }).fail(function() {
     return deferred.resolve();
@@ -730,8 +770,10 @@ updateCollectionCache = function(ctx, collectionKey, model) {
     return Utils.store.setItem(collectionKey, {
       "data": models,
       "expirationDate": 0
-    }).always(function() {
+    }).done(function() {
       return deferred.resolve();
+    }).fail(function() {
+      return wipeCache(ctx);
     });
   }).fail(function() {
     return Utils.store.setItem(collectionKey, {
@@ -740,6 +782,7 @@ updateCollectionCache = function(ctx, collectionKey, model) {
     }).done(function() {
       return deferred.resolve();
     }).fail(function() {
+      wipeCache(ctx);
       return deferred.reject();
     });
   });
@@ -809,7 +852,7 @@ updateCache = function(ctx, model, data) {
         return deferred.resolve();
       });
     }).fail(function() {
-      console.log("fail cache write");
+      wipeCache(ctx);
       return deferred.reject();
     });
   }
@@ -851,7 +894,11 @@ module.exports = Mnemosyne = (function() {
 
   _context = null;
 
-  function Mnemosyne() {
+  function Mnemosyne(options) {
+    if (options == null) {
+      options = {};
+    }
+    this.protectedKeys = options.protectedKeys || [];
     this._connectionManager = new ConnectionManager();
     this._requestManager = new RequestManager({
       onSynced: function(model, method, value) {
@@ -956,8 +1003,8 @@ module.exports = Mnemosyne = (function() {
    */
 
   Mnemosyne.prototype.cacheClear = function() {
-    this.clear();
-    return Utils.store.clear();
+    this.cancelAllPendingRequests();
+    return wipeCache(_context);
   };
 
 
@@ -998,7 +1045,7 @@ module.exports = Mnemosyne = (function() {
     Cancel all pending requests
    */
 
-  Mnemosyne.prototype.clear = function() {
+  Mnemosyne.prototype.cancelAllPendingRequests = function() {
     _context._offlineModels = [];
     return _context._requestManager.clear();
   };
