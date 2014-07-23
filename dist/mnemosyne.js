@@ -688,7 +688,11 @@ removeFromParentsCache = function(ctx, model) {
     return deferred.resolve();
   }
   deferredArray = _.map(parentKeys, function(parentKey) {
-    return removeFromCollectionCache(ctx, parentKey, model);
+    if (typeof parentKey === 'string') {
+      return removeFromCollectionCache(ctx, parentKey, model);
+    } else {
+      return removeFromCollectionCache(ctx, parentKey.key, model);
+    }
   });
   $.when.apply($, deferredArray).then(function() {
     return deferred.resolve();
@@ -753,7 +757,13 @@ updateParentsCache = function(ctx, model) {
     return deferred.resolve();
   }
   deferredArray = _.map(parentKeys, function(parentKey) {
-    return updateCollectionCache(ctx, parentKey, model);
+    if (typeof parentKey === 'string') {
+      return updateCollectionCache(ctx, parentKey, model);
+    } else if (parentKey.filter(model)) {
+      return updateCollectionCache(ctx, parentKey.key, model);
+    } else {
+      return removeFromCollectionCache(ctx, parentKey.key, model);
+    }
   });
   $.when(deferredArray).then(function() {
     return deferred.resolve();

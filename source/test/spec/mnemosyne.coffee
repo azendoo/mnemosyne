@@ -138,6 +138,26 @@ module.exports = describe 'Mnemosyne specifications', ->
                 expect(value).to.be.empty
                 done()
 
+      it 'should apply filter on parent collections', (done) ->
+        shouldBeInParentCollection = true
+        model.getParentKeys = ->
+          [
+            {key: 'parentKey1', filter: -> shouldBeInParentCollection}
+            {key: 'parentKey2', filter: -> shouldBeInParentCollection}
+          ]
+        model.save().done ->
+          mnemosyne.cacheRead('parentKey1').done (value)->
+            expect(value.data.length).to.equal(1)
+            mnemosyne.cacheRead('parentKey2').done (value)->
+              expect(value.data.length).to.equal(1)
+              shouldBeInParentCollection = false
+              model.save().done ->
+                mnemosyne.cacheRead('parentKey1').done (value)->
+                  expect(value.data.length).to.be.empty
+                  mnemosyne.cacheRead('parentKey2').done (value)->
+                    expect(value.data.length).to.be.empty
+                    done()
+
     describe 'Read value', ->
       it 'should trigger "syncing" event on model', (done) ->
         model.cache = {enabled : true}

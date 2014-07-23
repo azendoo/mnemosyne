@@ -86,7 +86,10 @@ removeFromParentsCache = (ctx, model) ->
   return deferred.resolve() if parentKeys.length is 0
 
   deferredArray = _.map(parentKeys, (parentKey)->
-    removeFromCollectionCache(ctx, parentKey, model)
+    if typeof parentKey is 'string'
+      removeFromCollectionCache(ctx, parentKey, model)
+    else
+      removeFromCollectionCache(ctx, parentKey.key, model)
     )
   $.when.apply($, deferredArray).then(
     -> deferred.resolve()
@@ -142,9 +145,13 @@ updateParentsCache = (ctx, model) ->
   return deferred.resolve() if parentKeys.length is 0
 
   deferredArray = _.map(parentKeys, (parentKey) ->
-    # <<<<< TODO ADD filter >>>>>
-    updateCollectionCache(ctx, parentKey, model)
-  )
+    if typeof parentKey is 'string'
+        updateCollectionCache(ctx, parentKey, model)
+    else if parentKey.filter(model)
+      updateCollectionCache(ctx, parentKey.key, model)
+    else
+      removeFromCollectionCache(ctx, parentKey.key, model)
+    )
   $.when(deferredArray).then(
     -> deferred.resolve()
     -> deferred.reject())

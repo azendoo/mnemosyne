@@ -44,6 +44,31 @@ Mnemosyne overrides **Backbone** `sync` method allowing caching requests.
   If the request succeeds, the deferred is resolved, and the `synced` event
   is triggered on the model.
 
+  # Collection cache synchronisation
+
+  Your model changes but your collection cache is not updated? Don't worry, just
+  implement `getParentKeys` method in your model and Mnemosyne will handle the rest.
+
+  `getParentKeys` returns a function computing a array of parent collections keys.
+  You can use only `strings` or use `objects` to pass a filter function.
+
+  This `filter` function will decide if you **keep** the value in the collection parent
+  cache. (true to keep, false to remove).
+
+  Example
+
+  ```javascript
+    MyAwesomeModel = Backbone.Model.extends({
+      getParentKeys: function(){
+        return [
+          'awesome/always',
+          {key: 'cool/sometimes', filter: function(model){return model.isCool()}}
+        ];
+      }
+    });
+  ```
+
+
 
 - `getPendingRequests()`
   Return an array containing all pending requests.
