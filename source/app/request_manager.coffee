@@ -24,24 +24,31 @@ getMethod= (request) ->
 
 
 # Helper to know if the request is empty, ie all actions have been performed
-isRequestEmpty = (request) ->
+requestsEmpty = (request) ->
   return Object.keys(request.methods).length is 0
 
 
 # Store all needed information into a request object
-initRequest = (ctx, method, model, options) ->
+initRequest = (ctx, req) ->
+  req.key ?= req.model.getKey()
+  req.options ?= {}
   # Is there allready some pending request for this model?
-  request = ctx.pendingRequests.getItem(model.getKey()) or {"methods": {}}
-  request.model   = model
-  request.key     = model.getKey()
-  request.url     = _.result(model, 'url')
-  request.cache   = model.cache
-  request.parentKeys      = model.getParentKeys()
-  request.methods[method] = options
-  pendingId = request.model.attributes['pending_id']
-  request.model.attributes['pending_id'] = new Date().getTime() if (not pendingId? and not model.get('id'))
-  request.deferred ?= $.Deferred()
-  return optimizeRequest(ctx, request)
+  if request = ctx.pendingRequests.getItem(req.key)
+    request.methods[req.method] = req.options
+    pendingId = request.model.attributes['pending_id']
+    request.model = req.model
+    request.deferred = $.Deferred if request.deferred.state() isnt 'pending'
+    if not req.model.get('id')?
+      req.model.attributes = pendingId or new Date().getTime()
+    return optimizeRequest(ctx, request)
+  else
+    req.parentKeys = req.model.getParentKeys()
+    req.model.attributes['pending_id'] = new Date().getTime() if not req.model.get('id')
+    req.deferred = $.Deferred()
+    req.methods  = {}
+    req.methods[req.method] = req.options
+
+    return req
 
 
 clearTimer = (ctx) ->
@@ -51,7 +58,10 @@ clearTimer = (ctx) ->
 
 
 enqueueRequest = (ctx, request) ->
-  ctx.pendingRequests.addTail(request.key, request)
+  ctx.pendingRequests.retrieveItem(request.key)
+  if request? and not requestsEmpty(request)
+    ctx.pendingRequests.addTail(request.key, request)
+
   if ctx.timeout is null
     consumeRequests(ctx)
 
@@ -69,10 +79,13 @@ consumeRequests = (ctx) ->
 
 
 onSendFail = (ctx, request, method, error) ->
+  model = request.model
   if ctx.interval < MAX_INTERVAL
     ctx.interval = ctx.interval * 2
 
-  if request.cache.enabled
+  console.debug 'onSendFail', request
+
+  if model.cache.enabled
     status = error.readyState
     # Cancel the request when on 4xx and 5xx status code
     # switch status
@@ -82,30 +95,46 @@ onSendFail = (ctx, request, method, error) ->
     #     request.deferred?.reject()
     #   else
     enqueueRequest(ctx, request)
-    ctx.callbacks.onPending(request.model, method)
-    request.deferred?.resolve(request.model.attributes)
+    ctx.callbacks.onPending(
+      model: model
+      key: request.key
+      method: method
+    )
+    request.deferred.resolve(model.attributes)
   else
-    ctx.callbacks.onCancelled(request.model)
-    request.deferred?.reject()
+    ctx.callbacks.onCancelled(
+      model: model
+      key  : request.key
+      method: method
+    )
+    request.deferred.reject()
 
   consumeRequests(ctx)
 
 
-onSendSuccess = (ctx, request, method, value) ->
+onSendSuccess = (ctx, request, method, data) ->
+  model = request.model
   delete request.methods[method]
   ctx.interval = MIN_INTERVAL
-  if isRequestEmpty(request)
+  if requestsEmpty(request)
     ctx.pendingRequests.retrieveItem(request.key)
-    ctx.callbacks.onSynced(request.model, method, value)
+    ctx.callbacks.onSynced({model: model, cache: model.cache, method: method, key: request.key}, data)
+    request.deferred.resolve(data)
   else
-    enqueueRequest(ctx, ctx.pendingRequests.retrieveItem(request.key))
+    enqueueRequest(ctx, request)
   consumeRequests(ctx)
 
 
-# Try to send request, if fail, push in queue and try again later
+# Try to send request, if it fails, push in queue and try again later
 sendRequest = (ctx, request) ->
-  deferred = request.deferred
   method  = getMethod(request)
+  model = request.model
+
+  # -- DEBUG --
+  if not method?
+    console.warn "DEBUG -- no method in sendRequest"
+    ctx.pendingRequests.retrieveItem(request.key)
+    return request.deferred.resolve() if requestsEmpty(request)
 
   if not Utils.isConnected()
     onSendFail(ctx, request, method, 0)
@@ -113,37 +142,29 @@ sendRequest = (ctx, request) ->
 
   else
     # Save and clean pending id before sync
-    pendingId = request.model.attributes["pending_id"]
-    delete request.model.attributes["pending_id"]
-
-    if not method?
-      onSendSuccess(ctx, request, method)
-      return deferred?.resolve.apply(this, arguments) if isRequestEmpty(request)
+    pendingId = model.attributes["pending_id"]
+    delete model.attributes["pending_id"]
 
     options = request.methods[method]
 
-    Backbone.sync(method, request.model, options)
-    .done (value) ->
-      request.model.attributes["pending_id"] = pendingId
-      onSendSuccess(ctx, request, method, value)
-      deferred?.resolve.apply(this, arguments) if isRequestEmpty(request)
+    Backbone.sync(method, model, options)
+    .done (data) ->
+      # Restore pending id
+      model.attributes["pending_id"] = pendingId
+      onSendSuccess(ctx, request, method, data)
 
     .fail (error) ->
-      request.model.attributes["pending_id"] = pendingId
+      model.attributes["pending_id"] = pendingId
       onSendFail(ctx, request, method, error)
-
-  return deferred
 
 
 # Make the request fit avoiding useless actions such as [create -> delete]
 optimizeRequest = (ctx, request) ->
-  if request.methods['delete']? and request.methods['create']?
+  if request.methods['create']? and request.methods['delete']?
     request.methods = {}
-    return request
 
-  if (request.methods['create']? or request.methods['delete']?) and request.methods['update']?
+  else if (request.methods['create']? or request.methods['delete']?) and request.methods['update']?
     delete request.methods['update']
-    return request
 
   return request
 
@@ -157,7 +178,7 @@ defaultCallbacks =
 module.exports = class RequestManager
 
   # You can give 3 differents callbacks: `onSynced`, `onPending`
-  # and `onCancelled`, they all are called with the model
+  # and `onCancelled`
   constructor: (@callbacks={}) ->
     _.defaults(@callbacks, defaultCallbacks)
 
@@ -186,7 +207,11 @@ module.exports = class RequestManager
   cancelPendingRequest: (key) ->
     request = @pendingRequests.retrieveItem(key)
     return if not request?
-    @callbacks.onCancelled(request.model)
+    @callbacks.onCancelled(
+      model: request.model
+      key  : request.key
+      cache: request.model.cache
+    )
 
 
   # Cancel all pending requests
@@ -194,13 +219,24 @@ module.exports = class RequestManager
     clearTimer(@)
     try
       for request in @pendingRequests.getQueue()
-        @callbacks.onCancelled(request.model)
+        @callbacks.onCancelled(
+          model: request.model
+          key  : request.key
+          cache: request.model.cache
+        )
     catch e
       console.warn "Bad content found into mnemosyne magic queue", e
     @pendingRequests.clear()
 
 
-  sync: (method, model, options = {}) ->
-    request = initRequest(@, method, model, options)
-    enqueueRequest(@, request)
+  sync: (request) ->
+    method = request.method
+    request = initRequest(@, request)
+    model = request.model
+    if requestsEmpty(request)
+      @pendingRequests.retrieveItem(request.key)
+      @callbacks.onSynced({model: model, cache: model.cache, method: method, key: request.key}, null)
+      request.deferred.resolve()
+    else
+      enqueueRequest(@, request)
     return request.deferred

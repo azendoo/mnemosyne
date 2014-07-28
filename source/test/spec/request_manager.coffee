@@ -25,9 +25,9 @@ module.exports = describe 'Request Manager specifications', ->
     localStorage.clear()
     serverSpy = sinon.spy()
     requestManager = new RequestManager
-      onSynced    : (model) -> model.finishSync()
-      onPending   : (model) -> model.pendingSync()
-      onCancelled : (model) -> model.unsync()
+      onSynced    : (request) -> request.model.finishSync()
+      onPending   : (request) -> request.model.pendingSync()
+      onCancelled : (request) -> request.model.unsync()
 
     class CustomModel extends Backbone.Model
       cache:
@@ -65,8 +65,9 @@ module.exports = describe 'Request Manager specifications', ->
       expect(requestManager.timeout).to.not.exist
 
       serverAutoRespondError()
-      requestManager.sync('create', model1)
+      requestManager.sync({method: 'create', model: model1})
       .always ->
+        expect(requestManager.timeout).to.exist
         requestManager.clear()
         expect(requestManager.timeout).to.not.exist
         done()
@@ -75,7 +76,7 @@ module.exports = describe 'Request Manager specifications', ->
       expect(requestManager.interval).to.equal(125)
 
       serverAutoRespondError()
-      requestManager.sync('create', model1)
+      requestManager.sync({method: 'create', model: model1})
       .always ->
         setTimeout((->
           expect(requestManager.interval).to.be.above(125)
@@ -88,9 +89,9 @@ module.exports = describe 'Request Manager specifications', ->
     it 'should save the queue in db', (done) ->
       serverAutoRespondError()
       $.when(
-        requestManager.sync('create', model1),
-        requestManager.sync('create', model2),
-        requestManager.sync('create', model3)
+        requestManager.sync({method: 'create', model: model1}),
+        requestManager.sync({method: 'create', model: model2}),
+        requestManager.sync({method: 'create', model: model3})
       ).done ->
         expect(JSON.parse(localStorage.getItem('mnemosyne.pendingRequests.orderedKeys')).length).to.equal(3)
         expect(Object.keys(JSON.parse(localStorage.getItem('mnemosyne.pendingRequests.dict'))).length).to.equal(3)
@@ -99,9 +100,9 @@ module.exports = describe 'Request Manager specifications', ->
     it 'should load and try sync when db storage is not empty', (done) ->
       serverAutoRespondError()
       $.when(
-        requestManager.sync('create', model1),
-        requestManager.sync('create', model2),
-        requestManager.sync('create', model3)
+        requestManager.sync({method: 'create', model: model1}),
+        requestManager.sync({method: 'create', model: model2}),
+        requestManager.sync({method: 'create', model: model3})
       ).done ->
         reqManager = new RequestManager()
         expect(reqManager.getPendingRequests().length).to.equal(3)
@@ -123,7 +124,7 @@ module.exports = describe 'Request Manager specifications', ->
         model1.cache = {enabled : true}
 
       it 'should resolve the promise', (done) ->
-        deferred = requestManager.sync('create', model1)
+        deferred = requestManager.sync({method: 'create', model: model1})
         deferred.always ->
           expect(serverSpy).to.have.been.calledOnce
           expect(deferred.state()).to.be.equal("resolved")
@@ -131,7 +132,7 @@ module.exports = describe 'Request Manager specifications', ->
 
       it 'should trigger "synced" event on model', (done) ->
         model1.on "synced", -> done()
-        requestManager.sync('update', model1)
+        requestManager.sync({method: 'update', model: model1})
 
     ###
                 ONLINE - CACHE disabled
@@ -141,7 +142,7 @@ module.exports = describe 'Request Manager specifications', ->
         model1.cache = {enabled : false}
 
       it 'should resolve the promise', (done) ->
-        deferred = requestManager.sync('create', model1)
+        deferred = requestManager.sync({method: 'create', model: model1})
         deferred.always ->
           expect(serverSpy).to.have.been.calledOnce
           expect(deferred.state()).to.be.equal("resolved")
@@ -149,7 +150,7 @@ module.exports = describe 'Request Manager specifications', ->
 
       it 'should trigger "synced" event on model', (done) ->
         model1.on "synced", -> done()
-        requestManager.sync('update', model1)
+        requestManager.sync({method: 'update', model: model1})
 
   ###
               +++++ OFFLINE +++++
@@ -166,7 +167,7 @@ module.exports = describe 'Request Manager specifications', ->
         model1.cache = {enabled : true}
 
       it 'should resolve the promise', (done) ->
-        deferred = requestManager.sync('create', model1)
+        deferred = requestManager.sync({method: 'create', model: model1})
         deferred.always ->
           expect(deferred.state()).to.be.equal("resolved")
           done()
@@ -174,11 +175,11 @@ module.exports = describe 'Request Manager specifications', ->
       it 'should trigger "pending" event on model', (done) ->
         model1.beginSync()
         model1.on "pending", -> done()
-        requestManager.sync('update', model1)
+        requestManager.sync({method: 'update', model: model1})
 
       it 'should trigger "pending" event on model if the request fail and is pushed in queue', (done) ->
         model1.on "pending", -> done()
-        requestManager.sync('update', model1)
+        requestManager.sync({method: 'update', model: model1})
 
       describe 'Spec getPendingRequests', ->
         it 'should return all pending requests', (done) ->
@@ -188,10 +189,10 @@ module.exports = describe 'Request Manager specifications', ->
           serverAutoRespondError()
 
           $.when(
-            requestManager.sync('update', model1),
-            requestManager.sync('update', model2),
-            requestManager.sync('update', model3),
-            requestManager.sync('update', model3) # duplicate
+            requestManager.sync({method: 'update', model: model1}),
+            requestManager.sync({method: 'update', model: model2}),
+            requestManager.sync({method: 'update', model: model3}),
+            requestManager.sync({method: 'update', model: model3}) # duplicate
           ).done ->
             nbPendingRequests = requestManager.getPendingRequests().length
             expect(nbPendingRequests).to.be.equal(3)
@@ -205,10 +206,10 @@ module.exports = describe 'Request Manager specifications', ->
 
           serverAutoRespondError()
           $.when(
-            requestManager.sync('update', model1),
-            requestManager.sync('update', model2),
-            requestManager.sync('update', model3),
-            requestManager.sync('update', model3) # duplicate
+            requestManager.sync({method: 'update', model: model1}),
+            requestManager.sync({method: 'update', model: model2}),
+            requestManager.sync({method: 'update', model: model3}),
+            requestManager.sync({method: 'update', model: model3}) # duplicate
           ).done ->
             requestManager.cancelPendingRequest(model3.getKey())
             nbPendingRequests = requestManager.getPendingRequests().length
@@ -225,10 +226,10 @@ module.exports = describe 'Request Manager specifications', ->
 
           serverAutoRespondError()
           $.when(
-            requestManager.sync('update', model1),
-            requestManager.sync('update', model2),
-            requestManager.sync('update', model3),
-            requestManager.sync('update', model3) # duplicate
+            requestManager.sync({method: 'update', model: model1}),
+            requestManager.sync({method: 'update', model: model2}),
+            requestManager.sync({method: 'update', model: model3}),
+            requestManager.sync({method: 'update', model: model3}) # duplicate
           ).done ->
             requestManager.cancelPendingRequest(model3.getKey())
             nbPendingRequests = requestManager.getPendingRequests().length
@@ -239,7 +240,7 @@ module.exports = describe 'Request Manager specifications', ->
           model1.on 'unsynced', -> done()
           model1.on 'pending', -> requestManager.cancelPendingRequest(model1.getKey())
           serverAutoRespondError()
-          requestManager.sync('update', model1)
+          requestManager.sync({method: 'update', model: model1})
 
 
       describe 'Spec retrySync', ->
@@ -252,9 +253,9 @@ module.exports = describe 'Request Manager specifications', ->
 
         it 'should cancel the request if a destroy is pending after a create', (done) ->
           $.when(
-            requestManager.sync('create', model1),
-            requestManager.sync('update', model1),
-            requestManager.sync('delete', model1)
+            requestManager.sync({method: 'create', model: model1}),
+            requestManager.sync({method: 'update', model: model1}),
+            requestManager.sync({method: 'delete', model: model1})
           ).always ->
             nbPendingRequests = requestManager.getPendingRequests().length
             expect(nbPendingRequests).to.be.equal(0)
@@ -262,8 +263,8 @@ module.exports = describe 'Request Manager specifications', ->
 
         it 'should cancel the update request if a create request is pending', (done) ->
           $.when(
-            requestManager.sync('create', model1),
-            requestManager.sync('update', model1),
+            requestManager.sync({method: 'create', model: model1}),
+            requestManager.sync({method: 'update', model: model1}),
           ).done ->
             nbPendingRequests = requestManager.getPendingRequests().length
             expect(nbPendingRequests).to.be.equal(1)
@@ -273,8 +274,8 @@ module.exports = describe 'Request Manager specifications', ->
 
         it 'should cancel the update request if a destroy request is pending', (done) ->
           $.when(
-            requestManager.sync('update', model1),
-            requestManager.sync('delete', model1)
+            requestManager.sync({method: 'update', model: model1}),
+            requestManager.sync({method: 'delete', model: model1})
           ).always ->
             methods = requestManager.getPendingRequests()[0].methods
             expect(methods.update).to.not.exist
@@ -289,7 +290,7 @@ module.exports = describe 'Request Manager specifications', ->
         model1.cache = {enabled : false}
 
       it 'should reject the promise', (done) ->
-        deferred = requestManager.sync('create', model1)
+        deferred = requestManager.sync({method: 'create', model: model1})
         deferred.always ->
           expect(serverSpy).to.not.have.been.called
           expect(deferred.state()).to.be.equal("rejected")
@@ -297,4 +298,4 @@ module.exports = describe 'Request Manager specifications', ->
 
       it 'should trigger "unsynced" event on model', (done) ->
         model1.on "unsynced", -> done()
-        requestManager.sync('update', model1)
+        requestManager.sync({method: 'update', model: model1})

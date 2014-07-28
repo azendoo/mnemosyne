@@ -5,6 +5,18 @@ ConnectionManager = require "../app/connection_manager"
 # Backbone = require "backbone"
 # _        = require "underscore"
 
+# Init the request object
+initRequest = (method, model, options) ->
+  request =
+    model: model
+    options: options
+    method: method
+    # Lock important values to avoid conflicts on pagination
+    key  : model.getKey?()
+    url  : _.result(model, 'url')
+
+  return request
+
 
 # Empty the database saving and restoring protected keys list
 wipeCache= (ctx) ->
@@ -35,70 +47,75 @@ wipeCache= (ctx) ->
 
 
 # Read the value from cache / server depending on conditions
-read = (ctx, model, options) ->
+read = (ctx, request) ->
   deferred = $.Deferred()
+  model = request.model
 
-  if typeof model.getKey isnt 'function' or not model.cache.enabled
-    return serverRead(ctx, model, options, deferred)
+  if not request.key? or not model.cache.enabled
+    return serverRead(ctx, request, deferred)
 
-  Utils.store.getItem(model.getKey())
+  Utils.store.getItem(request.key)
   .done (value) ->
-    validCacheValue(ctx, model, options, value, deferred)
+    validCacheValue(ctx, request, value, deferred)
   .fail ->
-    serverRead(ctx, model, options, deferred)
+    serverRead(ctx, request, deferred)
 
   return deferred
 
 
 # Decide to use or update the value depending on
 # value.expirationDate, options.forceRefresh, and model.cache.allowExpiredCache
-validCacheValue = (ctx, model, options, value, deferred) ->
-  if options.forceRefresh
-    serverRead(ctx, model, options, deferred)
+validCacheValue = (ctx, request, value, deferred) ->
+  model = request.model
+  if request.options.forceRefresh
+    return serverRead(ctx, request, deferred)
 
   # -- Cache expired
   else if value.expirationDate < new Date().getTime()
+    console.debug 'cache expired'
     if model.cache.allowExpiredCache and value?
       deferred.resolve(value.data)
     # Try to sync with server
-    serverRead(ctx, model, options, deferred)
+    return serverRead(ctx, request, deferred)
 
   # -- Cache valid
   else
-    deferred.resolve(value.data)
+    console.debug ' cache valid'
+    return deferred.resolve(value.data)
 
 
-# Sync `UPDATE` the model with server
-serverRead = (ctx, model, options, deferred) ->
+# Sync `READ` the model with server
+serverRead = (ctx, request, deferred) ->
   console.log "Sync from server"
 
   if not Utils.isConnected()
     console.log 'No connection'
-    if model instanceof Backbone.Collection
-      return deferred.resolve([])
+    if request.model instanceof Backbone.Collection
+      return deferred.reject()
     else
       return deferred.reject()
 
-  Backbone.sync('read', model, options)
-  .done (value)->
+  Backbone.sync('read', request.model, request.options)
+  .done (data)->
     console.log "Succeed sync from server"
-    addToCache(ctx, model, value).always -> deferred.resolve(value)
+    addToCache(ctx, request, data).always -> deferred.resolve(data)
 
   .fail (error) ->
-    console.log "Fail sync from server"
+    console.log "Fail sync from server", arguments
     deferred.reject.apply(this, arguments)
 
 
 # Remove the value of model attributes from the collection
-removeFromCollectionCache = (ctx, collectionKey, model) ->
+removeFromCollectionCache = (ctx, request, collectionKey) ->
   deferred = $.Deferred()
+  model = request.model
 
   Utils.store.getItem(collectionKey)
   .done (value) ->
     models = value.data
     if model.get('pending_id')
       models = _.filter(models, (m) -> m.pending_id isnt model.get('pending_id'))
-    else
+    if model.get('id')
       models = _.filter(models, (m) -> m.id isnt model.get('id'))
     Utils.store.setItem(collectionKey, {"data" : models, "expirationDate" : value.expirationDate})
     .done -> deferred.resolve()
@@ -110,17 +127,17 @@ removeFromCollectionCache = (ctx, collectionKey, model) ->
   return deferred
 
 # Remove the model from all his parents cache
-removeFromParentsCache = (ctx, model) ->
+removeFromParentsCache = (ctx, request) ->
   deferred = $.Deferred()
 
-  parentKeys = model.getParentKeys()
+  parentKeys = request.model.getParentKeys?() or []
   return deferred.resolve() if parentKeys.length is 0
 
   deferredArray = _.map(parentKeys, (parentKey)->
     if typeof parentKey is 'string'
-      removeFromCollectionCache(ctx, parentKey, model)
+      removeFromCollectionCache(ctx, request, parentKey)
     else
-      removeFromCollectionCache(ctx, parentKey.key, model)
+      removeFromCollectionCache(ctx, request, parentKey.key)
     )
   $.when.apply($, deferredArray).then(
     -> deferred.resolve()
@@ -130,18 +147,19 @@ removeFromParentsCache = (ctx, model) ->
 
 
 # Remove the model from cache and parent collections cache
-removeFromCache = (ctx, model) ->
+removeFromCache = (ctx, request) ->
   deferred = $.Deferred()
 
-  Utils.store.removeItem(model).always ->
-    removeFromParentsCache(ctx, model).always -> deferred.resolve()
+  Utils.store.removeItem(request.key).always ->
+    removeFromParentsCache(ctx, request).always -> deferred.resolve()
 
   return deferred
 
 
 # Update / add the value of model attributes into the collection
-updateCollectionCache = (ctx, collectionKey, model) ->
+updateCollectionCache = (ctx, request, collectionKey) ->
   deferred = $.Deferred()
+  model = request.model
 
   Utils.store.getItem(collectionKey)
   .done (value) ->
@@ -159,13 +177,14 @@ updateCollectionCache = (ctx, collectionKey, model) ->
       models.unshift(model.attributes)
     Utils.store.setItem(collectionKey, {"data" : models, "expirationDate": 0})
     .done -> deferred.resolve()
-    .fail -> wipeCache(ctx)
+    .fail ->
+      wipeCache(ctx)
+      deferred.reject()
 
   .fail ->
     # Create the collection in cache and add the model
     Utils.store.setItem(collectionKey, {"data" : [model.attributes], "expirationDate": 0})
-    .done ->
-      deferred.resolve()
+    .done -> deferred.resolve()
     .fail ->
       wipeCache(ctx)
       deferred.reject()
@@ -174,20 +193,20 @@ updateCollectionCache = (ctx, collectionKey, model) ->
 
 
 # Update /  add the model to parents collections
-updateParentsCache = (ctx, model) ->
+updateParentsCache = (ctx, request) ->
   deferred = $.Deferred()
 
-  return deferred.resolve()  if model instanceof Backbone.Collection
-  parentKeys = model.getParentKeys()
+  return deferred.resolve()  if request.model instanceof Backbone.Collection
+  parentKeys = request.model.getParentKeys?() or []
   return deferred.resolve() if parentKeys.length is 0
 
   deferredArray = _.map(parentKeys, (parentKey) ->
     if typeof parentKey is 'string'
-        updateCollectionCache(ctx, parentKey, model)
-    else if parentKey.filter(model)
-      updateCollectionCache(ctx, parentKey.key, model)
+        updateCollectionCache(ctx, request, parentKey)
+    else if parentKey.filter?(request.model)
+      updateCollectionCache(ctx, request, parentKey.key)
     else
-      removeFromCollectionCache(ctx, parentKey.key, model)
+      removeFromCollectionCache(ctx, request, parentKey.key)
     )
   $.when(deferredArray).then(
     -> deferred.resolve()
@@ -196,9 +215,10 @@ updateParentsCache = (ctx, model) ->
   return deferred
 
 
-# Update / add the model to cache and parents collections
-addToCache = (ctx, model, data) ->
+# Update / add the model / collection to cache and parents collections
+addToCache = (ctx, request, data) ->
   deferred = $.Deferred()
+  model = request.model
   return deferred.resolve() if not model.cache.enabled
 
   expiredDate = (new Date()).getTime() + model.cache.ttl * 1000
@@ -213,10 +233,10 @@ addToCache = (ctx, model, data) ->
     console.warn "Wrong instance for ", model
     return deferred.reject()
 
-  Utils.store.setItem(model.getKey(), {"data" : data, "expirationDate": expiredDate})
+  Utils.store.setItem(request.key, {"data" : data, "expirationDate": expiredDate})
   .done ->
     console.log "Succeed cache write"
-    updateParentsCache(ctx, model)
+    updateParentsCache(ctx, request)
     .always ->
       deferred.resolve()
   .fail ->
@@ -248,30 +268,34 @@ module.exports = class Mnemosyne
     @protectedKeys = options.protectedKeys or []
     @_connectionManager = new ConnectionManager()
     @_requestManager    = new RequestManager
-      onSynced  : (model, method, value) ->
+      onSynced  : (request, data) ->
+        model = request.model
         return if model.isSynced()
         # Remove the pending model
-        if method is 'create'
-          removeFromCache(_context, model).always ->
+        if request.method is 'create'
+          removeFromCache(_context, request).always ->
             delete model.attributes['pending_id'] if model instanceof Backbone.Model
+            addToCache(_context, request, data)
 
-        if method isnt 'delete'
-          addToCache(_context, model, value)
+        else if request.method isnt 'delete'
+            addToCache(_context, request, data)
 
         model.finishSync()
 
-      onPending  : (model, method) ->
+      onPending  : (request) ->
+        model = request.model
         return if model.isPending()
-        if method isnt 'delete'
-          addToCache(_context, model)
+        if request.method isnt 'delete'
+          addToCache(_context, request)
 
         model.pendingSync()
 
-      onCancelled : (model) ->
+      onCancelled : (request) ->
+        model = request.model
         return if model.isUnsynced()
         if model instanceof Backbone.Model and not model.get('id')
           # Remove the model from offline models and collection
-          removeFromCache(_context, model)
+          removeFromCache(_context, request)
 
         model.unsync()
 
@@ -288,7 +312,8 @@ module.exports = class Mnemosyne
     if key instanceof Backbone.Model or key instanceof Backbone.Collection
       model = key
       model.cache = _.defaults(model.cache or {}, defaultCacheOptions)
-      return addToCache(_context, model)
+      request = initRequest(null, model, {})
+      return addToCache(_context, request)
     return Utils.store.setItem(key, value)
 
 
@@ -317,7 +342,8 @@ module.exports = class Mnemosyne
   cacheRemove: (key) ->
     if key instanceof Backbone.Model or key instanceof Backbone.Collection
       model = key
-      return removeFromCache(_context, model)
+      equest = initRequest(null, model, {})
+      return removeFromCache(_context, request)
     return Utils.store.removeItem(key)
 
 
@@ -373,23 +399,24 @@ module.exports = class Mnemosyne
     console.log "\n" + model.getKey()
 
     model.beginSync()
+    request = initRequest(method, model, options)
     switch method
       when 'read'
-        read(_context, model, options)
+        read(_context, request)
         .done (data=[]) ->
           options.success?(data, 'success', null)
           model.finishSync()
           deferred.resolve(data)
         .fail ->
-          deferred.reject.apply this, arguments
           model.unsync()
+          deferred.reject.apply this, arguments
 
       when 'delete'
-        removeFromCache(_context, model)
-        deferred = _context._requestManager.sync(method, model, options)
+        removeFromCache(_context, request)
+        deferred = _context._requestManager.sync(request)
 
       else #update - create
-        deferred = _context._requestManager.sync(method, model, options)
+        deferred = _context._requestManager.sync(request)
 
     return deferred
 

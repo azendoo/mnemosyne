@@ -513,6 +513,13 @@ module.exports = describe 'Mnemosyne specifications', ->
 
     describe 'Cache invalidation', ->
 
+      it 'should trigger "syncing" event on model', (done) ->
+        completed = false
+        model.on 'syncing', -> completed = true
+        model.save().always ->
+          expect(completed).to.be.true
+          done()
+
       it 'should remove the model from the cache of all parent collection', (done) ->
         model.setName('offline model')
 
@@ -529,10 +536,6 @@ module.exports = describe 'Mnemosyne specifications', ->
                     done()
 
               model.destroy()
-
-    it 'should trigger "syncing" event on model', (done) ->
-      model.on 'syncing', -> done()
-      model.save()
 
 
     describe 'Read value', ->
@@ -626,12 +629,18 @@ module.exports = describe 'Mnemosyne specifications', ->
             collection.cache.allowExpiredCache = false
 
           it 'should trigger "unsynced" event on model', (done) ->
-            model.on "unsynced", -> done()
-            model.fetch()
+            completed = false
+            model.on "unsynced", -> completed = true
+            model.fetch().always ->
+              expect(completed).to.be.true
+              done()
 
           it 'should trigger "unsynced" event on collection', (done) ->
-            collection.on "unsynced", -> done()
-            collection.fetch()
+            completed = false
+            collection.on "unsynced", -> completed = true
+            collection.fetch().always ->
+              expect(completed).to.be.true
+              done()
 
           it 'should not use data from cache when fetching model and fail', (done) ->
             model.setName("noName")
