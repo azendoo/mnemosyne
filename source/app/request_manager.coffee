@@ -37,13 +37,13 @@ initRequest = (ctx, req) ->
     request.methods[req.method] = req.options
     pendingId = request.model.attributes['pending_id']
     request.model = req.model
-    request.deferred = $.Deferred if request.deferred.state() isnt 'pending'
+    request.deferred = $.Deferred() if request.deferred.state() isnt 'pending'
     if not req.model.get('id')?
-      req.model.attributes = pendingId or new Date().getTime()
+      req.model.attributes['pending_id'] = pendingId or new Date().getTime()
     return optimizeRequest(ctx, request)
   else
     req.parentKeys = req.model.getParentKeys()
-    req.model.attributes['pending_id'] = new Date().getTime() if not req.model.get('id')
+    req.model.attributes['pending_id'] ?= new Date().getTime() if not req.model.get('id')
     req.deferred = $.Deferred()
     req.methods  = {}
     req.methods[req.method] = req.options

@@ -90,6 +90,8 @@ module.exports = describe 'Mnemosyne specifications', ->
   afterEach ->
     server.restore()
     mnemosyne.cacheClear()
+    localStorage.clear()
+
 
 
   serverAutoRespondError = ->

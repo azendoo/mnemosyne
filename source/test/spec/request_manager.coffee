@@ -49,6 +49,8 @@ module.exports = describe 'Request Manager specifications', ->
   afterEach ->
     server.restore()
     requestManager.clear()
+    localStorage.clear()
+
 
 
 

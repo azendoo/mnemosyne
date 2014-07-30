@@ -221,7 +221,7 @@ requestsEmpty = function(request) {
 };
 
 initRequest = function(ctx, req) {
-  var pendingId, request;
+  var pendingId, request, _base;
   if (req.key == null) {
     req.key = req.model.getKey();
   }
@@ -233,16 +233,18 @@ initRequest = function(ctx, req) {
     pendingId = request.model.attributes['pending_id'];
     request.model = req.model;
     if (request.deferred.state() !== 'pending') {
-      request.deferred = $.Deferred;
+      request.deferred = $.Deferred();
     }
     if (req.model.get('id') == null) {
-      req.model.attributes = pendingId || new Date().getTime();
+      req.model.attributes['pending_id'] = pendingId || new Date().getTime();
     }
     return optimizeRequest(ctx, request);
   } else {
     req.parentKeys = req.model.getParentKeys();
     if (!req.model.get('id')) {
-      req.model.attributes['pending_id'] = new Date().getTime();
+      if ((_base = req.model.attributes)['pending_id'] == null) {
+        _base['pending_id'] = new Date().getTime();
+      }
     }
     req.deferred = $.Deferred();
     req.methods = {};
