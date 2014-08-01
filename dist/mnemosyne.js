@@ -23,12 +23,7 @@ removeValue = function(ctx, key) {
   return value;
 };
 
-dbSync = function(ctx) {
-  return _.defer(function() {
-    localStorage.setItem(ctx.key + '.orderedKeys', JSON.stringify(ctx.orderedKeys));
-    return localStorage.setItem(ctx.key + '.dict', JSON.stringify(ctx.dict));
-  });
-};
+dbSync = function(ctx) {};
 
 DEFAULT_STORAGE_KEY = 'mnemosyne.pendingRequests';
 
@@ -223,12 +218,14 @@ requestsEmpty = function(request) {
 initRequest = function(ctx, req) {
   var pendingId, request, _base;
   if (req.key == null) {
-    req.key = req.model.getKey();
+    req.key = function() {
+      return req.model.getKey() + ("/" + (req.model.get('id')));
+    };
   }
   if (req.options == null) {
     req.options = {};
   }
-  if (request = ctx.pendingRequests.getItem(req.key)) {
+  if (request = ctx.pendingRequests.getItem(req.key())) {
     request.methods[req.method] = req.options;
     pendingId = request.model.attributes['pending_id'];
     request.model = req.model;
@@ -260,9 +257,9 @@ clearTimer = function(ctx) {
 };
 
 enqueueRequest = function(ctx, request) {
-  ctx.pendingRequests.retrieveItem(request.key);
+  ctx.pendingRequests.retrieveItem(request.key());
   if ((request != null) && !requestsEmpty(request)) {
-    ctx.pendingRequests.addTail(request.key, request);
+    ctx.pendingRequests.addTail(request.key(), request);
   }
   if (ctx.timeout === null) {
     return consumeRequests(ctx);
@@ -282,28 +279,38 @@ consumeRequests = function(ctx) {
 };
 
 onSendFail = function(ctx, request, method, error) {
-  var model, status;
+  var cancelRequest, model, status;
   model = request.model;
   if (ctx.interval < MAX_INTERVAL) {
     ctx.interval = ctx.interval * 2;
   }
   console.debug('onSendFail', request);
-  if (model.cache.enabled) {
-    status = error.readyState;
-    enqueueRequest(ctx, request);
-    ctx.callbacks.onPending({
-      model: model,
-      key: request.key,
-      method: method
-    });
-    request.deferred.resolve(model.attributes);
-  } else {
+  cancelRequest = function() {
     ctx.callbacks.onCancelled({
       model: model,
       key: request.key,
       method: method
     });
-    request.deferred.reject();
+    return request.deferred.reject();
+  };
+  if (model.cache.enabled) {
+    status = error.readyState;
+    switch (status) {
+      case 4:
+      case 5:
+        cancelRequest();
+        break;
+      default:
+        enqueueRequest(ctx, request);
+        ctx.callbacks.onPending({
+          model: model,
+          key: request.key,
+          method: method
+        });
+        request.deferred.resolve(model.attributes);
+    }
+  } else {
+    cancelRequest();
   }
   return consumeRequests(ctx);
 };
@@ -314,7 +321,7 @@ onSendSuccess = function(ctx, request, method, data) {
   delete request.methods[method];
   ctx.interval = MIN_INTERVAL;
   if (requestsEmpty(request)) {
-    ctx.pendingRequests.retrieveItem(request.key);
+    ctx.pendingRequests.retrieveItem(request.key());
     ctx.callbacks.onSynced({
       model: model,
       cache: model.cache,
@@ -334,7 +341,7 @@ sendRequest = function(ctx, request) {
   model = request.model;
   if (method == null) {
     console.warn("DEBUG -- no method in sendRequest");
-    ctx.pendingRequests.retrieveItem(request.key);
+    ctx.pendingRequests.retrieveItem(request.key());
     if (requestsEmpty(request)) {
       return request.deferred.resolve();
     }
@@ -378,7 +385,7 @@ module.exports = RequestManager = (function() {
     onRestore = function(request) {
       request.model = new Backbone.Model(request.model);
       request.model.getKey = function() {
-        return request.key;
+        return request.key();
       };
       request.model.getParentKeys = function() {
         return request.parentKeys;
@@ -440,7 +447,7 @@ module.exports = RequestManager = (function() {
     request = initRequest(this, request);
     model = request.model;
     if (requestsEmpty(request)) {
-      this.pendingRequests.retrieveItem(request.key);
+      this.pendingRequests.retrieveItem(request.key());
       this.callbacks.onSynced({
         model: model,
         cache: model.cache,
@@ -643,7 +650,7 @@ module.exports = ConnectionManager = (function() {
 
 });
 
-define('mnemosyne',['require','exports','module','../app/request_manager','../app/sync_machine','../app/utils','../app/connection_manager'],function (require, exports, module) {var ConnectionManager, Mnemosyne, MnemosyneCollection, MnemosyneModel, RequestManager, SyncMachine, Utils, addToCache, defaultCacheOptions, defaultOptions, initRequest, read, removeFromCache, removeFromCollectionCache, removeFromParentsCache, serverRead, updateCollectionCache, updateParentsCache, validCacheValue, wipeCache, _destroy;
+define('mnemosyne',['require','exports','module','../app/request_manager','../app/sync_machine','../app/utils','../app/connection_manager'],function (require, exports, module) {var ConnectionManager, Mnemosyne, MnemosyneCollection, MnemosyneModel, RequestManager, SyncMachine, Utils, addToCache, defaultCacheOptions, defaultOptions, getModelKey, initRequest, read, removeFromCache, removeFromCollectionCache, removeFromParentsCache, serverRead, updateCollectionCache, updateParentsCache, validCacheValue, wipeCache, _destroy;
 
 RequestManager = require("../app/request_manager");
 
@@ -653,13 +660,37 @@ Utils = require("../app/utils");
 
 ConnectionManager = require("../app/connection_manager");
 
+getModelKey = function(model) {
+  var getKey, key;
+  if (model instanceof Backbone.Collection) {
+    key = typeof model.getKey === "function" ? model.getKey() : void 0;
+    getKey = function() {
+      return key;
+    };
+  } else if (typeof model.getKey === 'function') {
+    getKey = function() {
+      var id;
+      if (id = model.get('id')) {
+        return model.getKey() + ("/" + id);
+      } else {
+        return model.getKey() + ("/" + (model.get('pending_id')));
+      }
+    };
+  } else {
+    getKey = function() {
+      return model.get('id');
+    };
+  }
+  return getKey;
+};
+
 initRequest = function(method, model, options) {
   var request;
   request = {
     model: model,
     options: options,
     method: method,
-    key: typeof model.getKey === "function" ? model.getKey() : void 0,
+    key: getModelKey(model),
     url: _.result(model, 'url')
   };
   return request;
@@ -701,10 +732,10 @@ read = function(ctx, request) {
   var deferred, model;
   deferred = $.Deferred();
   model = request.model;
-  if ((request.key == null) || !model.cache.enabled) {
+  if (!model.cache.enabled) {
     return serverRead(ctx, request, deferred);
   }
-  Utils.store.getItem(request.key).done(function(value) {
+  Utils.store.getItem(request.key()).done(function(value) {
     return validCacheValue(ctx, request, value, deferred);
   }).fail(function() {
     return serverRead(ctx, request, deferred);
@@ -792,7 +823,7 @@ removeFromParentsCache = function(ctx, request) {
     if (typeof parentKey === 'string') {
       return removeFromCollectionCache(ctx, request, parentKey);
     } else {
-      return removeFromCollectionCache(ctx, request, parentKey.key);
+      return removeFromCollectionCache(ctx, request, parentKey.key());
     }
   });
   $.when.apply($, deferredArray).then(function() {
@@ -804,13 +835,23 @@ removeFromParentsCache = function(ctx, request) {
 };
 
 removeFromCache = function(ctx, request) {
-  var deferred;
+  var baseKey, deferred, model;
   deferred = $.Deferred();
-  Utils.store.removeItem(request.key).always(function() {
-    return removeFromParentsCache(ctx, request).always(function() {
+  model = request.model;
+  if (model instanceof Backbone.Collection) {
+    Utils.store.removeItem(model.getKey()).always(function() {
       return deferred.resolve();
     });
-  });
+  } else {
+    baseKey = model.getKey();
+    Utils.store.removeItem(baseKey + ("/" + (model.get('pending_id')))).always(function() {
+      return Utils.store.removeItem(baseKey + ("/" + (model.get('id')))).always(function() {
+        return removeFromParentsCache(ctx, request).always(function() {
+          return deferred.resolve();
+        });
+      });
+    });
+  }
   return deferred;
 };
 
@@ -907,7 +948,7 @@ addToCache = function(ctx, request, data) {
     console.warn("Wrong instance for ", model);
     return deferred.reject();
   }
-  Utils.store.setItem(request.key, {
+  Utils.store.setItem(request.key(), {
     "data": data,
     "expirationDate": expiredDate
   }).done(function() {
@@ -1031,7 +1072,7 @@ module.exports = Mnemosyne = (function() {
       if (typeof model.getKey !== 'function') {
         return deferred.reject();
       }
-      Utils.store.getItem(model.getKey()).done(function(value) {
+      Utils.store.getItem(getModelKey(model)()).done(function(value) {
         return deferred.resolve(value.data);
       }).fail(function() {
         return deferred.reject();

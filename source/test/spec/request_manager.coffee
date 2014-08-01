@@ -24,6 +24,7 @@ module.exports = describe 'Request Manager specifications', ->
   beforeEach ->
     localStorage.clear()
     serverSpy = sinon.spy()
+    requestManager = null
     requestManager = new RequestManager
       onSynced    : (request) -> request.model.finishSync()
       onPending   : (request) -> request.model.pendingSync()
@@ -37,7 +38,7 @@ module.exports = describe 'Request Manager specifications', ->
         super
         @setTime(new Date().getTime())
 
-      getKey: -> 'modelKey_request'+ @get('id')
+      getKey: -> '/modelKey_request'
       getTime: -> @get('time')
       setTime: (value) -> @set('time', value)
       url: -> '/test_route'
@@ -49,8 +50,8 @@ module.exports = describe 'Request Manager specifications', ->
   afterEach ->
     server.restore()
     requestManager.clear()
+    requestManager = null
     localStorage.clear()
-
 
 
 
@@ -213,7 +214,7 @@ module.exports = describe 'Request Manager specifications', ->
             requestManager.sync({method: 'update', model: model3}),
             requestManager.sync({method: 'update', model: model3}) # duplicate
           ).done ->
-            requestManager.cancelPendingRequest(model3.getKey())
+            requestManager.cancelPendingRequest(model3.getKey() + "/#{model3.get('id')}")
             nbPendingRequests = requestManager.getPendingRequests().length
             expect(nbPendingRequests).to.be.equal(2)
             done()
@@ -233,14 +234,14 @@ module.exports = describe 'Request Manager specifications', ->
             requestManager.sync({method: 'update', model: model3}),
             requestManager.sync({method: 'update', model: model3}) # duplicate
           ).done ->
-            requestManager.cancelPendingRequest(model3.getKey())
+            requestManager.cancelPendingRequest(model3.getKey() + "/#{model3.get('id')}")
             nbPendingRequests = requestManager.getPendingRequests().length
             expect(nbPendingRequests).to.be.equal(2)
             done()
 
         it 'should trigger "unsynced" on model when the request is cancelled', (done) ->
           model1.on 'unsynced', -> done()
-          model1.on 'pending', -> requestManager.cancelPendingRequest(model1.getKey())
+          model1.on 'pending', -> requestManager.cancelPendingRequest(model1.getKey() + "/#{model1.get('id')}")
           serverAutoRespondError()
           requestManager.sync({method: 'update', model: model1})
 

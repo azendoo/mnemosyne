@@ -5,6 +5,24 @@ ConnectionManager = require "../app/connection_manager"
 # Backbone = require "backbone"
 # _        = require "underscore"
 
+
+getModelKey = (model) ->
+  if model instanceof Backbone.Collection
+    key = model.getKey?()
+    getKey = -> key
+
+  else if typeof model.getKey is 'function'
+    getKey = ->
+      if id = model.get('id')
+        model.getKey() + "/#{id}"
+      else
+        model.getKey() + "/#{model.get('pending_id')}"
+  else
+    getKey = ->
+      model.get('id')
+
+  return getKey
+
 # Init the request object
 initRequest = (method, model, options) ->
   request =
@@ -12,7 +30,7 @@ initRequest = (method, model, options) ->
     options: options
     method: method
     # Lock important values to avoid conflicts on pagination
-    key  : model.getKey?()
+    key  : getModelKey(model)
     url  : _.result(model, 'url')
 
   return request
@@ -51,10 +69,10 @@ read = (ctx, request) ->
   deferred = $.Deferred()
   model = request.model
 
-  if not request.key? or not model.cache.enabled
+  if not model.cache.enabled
     return serverRead(ctx, request, deferred)
 
-  Utils.store.getItem(request.key)
+  Utils.store.getItem(request.key())
   .done (value) ->
     validCacheValue(ctx, request, value, deferred)
   .fail ->
@@ -137,7 +155,7 @@ removeFromParentsCache = (ctx, request) ->
     if typeof parentKey is 'string'
       removeFromCollectionCache(ctx, request, parentKey)
     else
-      removeFromCollectionCache(ctx, request, parentKey.key)
+      removeFromCollectionCache(ctx, request, parentKey.key())
     )
   $.when.apply($, deferredArray).then(
     -> deferred.resolve()
@@ -149,9 +167,15 @@ removeFromParentsCache = (ctx, request) ->
 # Remove the model from cache and parent collections cache
 removeFromCache = (ctx, request) ->
   deferred = $.Deferred()
-
-  Utils.store.removeItem(request.key).always ->
-    removeFromParentsCache(ctx, request).always -> deferred.resolve()
+  model = request.model
+  if model instanceof Backbone.Collection
+    Utils.store.removeItem(model.getKey())
+    .always -> deferred.resolve()
+  else
+    baseKey = model.getKey()
+    Utils.store.removeItem(baseKey + "/#{model.get('pending_id')}").always ->
+      Utils.store.removeItem(baseKey + "/#{model.get('id')}").always ->
+        removeFromParentsCache(ctx, request).always -> deferred.resolve()
 
   return deferred
 
@@ -233,7 +257,7 @@ addToCache = (ctx, request, data) ->
     console.warn "Wrong instance for ", model
     return deferred.reject()
 
-  Utils.store.setItem(request.key, {"data" : data, "expirationDate": expiredDate})
+  Utils.store.setItem(request.key(), {"data" : data, "expirationDate": expiredDate})
   .done ->
     console.log "Succeed cache write"
     updateParentsCache(ctx, request)
@@ -327,7 +351,7 @@ module.exports = class Mnemosyne
       model = key
       deferred = $.Deferred()
       return deferred.reject() if typeof model.getKey isnt 'function'
-      Utils.store.getItem(model.getKey())
+      Utils.store.getItem(getModelKey(model)())
       .done (value) -> deferred.resolve(value.data)
       .fail -> deferred.reject()
       return deferred

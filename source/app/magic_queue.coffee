@@ -9,9 +9,10 @@ removeValue = (ctx, key) ->
 
 #Sync the queue with database
 dbSync = (ctx) ->
-  _.defer ->
-    localStorage.setItem(ctx.key + '.orderedKeys', JSON.stringify(ctx.orderedKeys))
-    localStorage.setItem(ctx.key + '.dict', JSON.stringify(ctx.dict))
+  return
+  # _.defer ->
+  #   localStorage.setItem(ctx.key + '.orderedKeys', JSON.stringify(ctx.orderedKeys))
+  #   localStorage.setItem(ctx.key + '.dict', JSON.stringify(ctx.dict))
 
 DEFAULT_STORAGE_KEY = 'mnemosyne.pendingRequests'
 
@@ -31,7 +32,7 @@ module.exports = class MagicQueue
     # Apply the `onRestore` fun on each restored elements
     # if typeof onRestore is 'function'
       # _.map(@dict, onRestore)
-      
+
 
 
   addHead: (key, value) ->
