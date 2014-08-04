@@ -6,31 +6,16 @@ ConnectionManager = require "../app/connection_manager"
 # _        = require "underscore"
 
 
-getModelKey = (model) ->
-  if model instanceof Backbone.Collection
-    key = model.getKey?()
-    getKey = -> key
-
-  else if typeof model.getKey is 'function'
-    getKey = ->
-      if id = model.get('id')
-        model.getKey() + "/#{id}"
-      else
-        model.getKey() + "/#{model.get('pending_id')}"
-  else
-    getKey = ->
-      model.get('id')
-
-  return getKey
-
 # Init the request object
 initRequest = (method, model, options) ->
+  if model instanceof Backbone.Model and not model.get('id')
+    model.attributes['pending_id'] = new Date().getTime()
   request =
     model: model
     options: options
     method: method
     # Lock important values to avoid conflicts on pagination
-    key  : getModelKey(model)
+    key  : model.getKey()
     url  : _.result(model, 'url')
 
   return request
@@ -72,7 +57,7 @@ read = (ctx, request) ->
   if not model.cache.enabled
     return serverRead(ctx, request, deferred)
 
-  Utils.store.getItem(request.key())
+  Utils.store.getItem(request.key)
   .done (value) ->
     validCacheValue(ctx, request, value, deferred)
   .fail ->
@@ -155,7 +140,7 @@ removeFromParentsCache = (ctx, request) ->
     if typeof parentKey is 'string'
       removeFromCollectionCache(ctx, request, parentKey)
     else
-      removeFromCollectionCache(ctx, request, parentKey.key())
+      removeFromCollectionCache(ctx, request, parentKey.key)
     )
   $.when.apply($, deferredArray).then(
     -> deferred.resolve()
@@ -172,10 +157,8 @@ removeFromCache = (ctx, request) ->
     Utils.store.removeItem(model.getKey())
     .always -> deferred.resolve()
   else
-    baseKey = model.getKey()
-    Utils.store.removeItem(baseKey + "/#{model.get('pending_id')}").always ->
-      Utils.store.removeItem(baseKey + "/#{model.get('id')}").always ->
-        removeFromParentsCache(ctx, request).always -> deferred.resolve()
+    Utils.store.removeItem(request.key).always ->
+      removeFromParentsCache(ctx, request).always -> deferred.resolve()
 
   return deferred
 
@@ -257,7 +240,7 @@ addToCache = (ctx, request, data) ->
     console.warn "Wrong instance for ", model
     return deferred.reject()
 
-  Utils.store.setItem(request.key(), {"data" : data, "expirationDate": expiredDate})
+  Utils.store.setItem(request.key, {"data" : data, "expirationDate": expiredDate})
   .done ->
     console.log "Succeed cache write"
     updateParentsCache(ctx, request)
@@ -292,24 +275,25 @@ module.exports = class Mnemosyne
     @protectedKeys = options.protectedKeys or []
     @_connectionManager = new ConnectionManager()
     @_requestManager    = new RequestManager
-      onSynced  : (request, data) ->
+      onSynced  : (request, method, data) ->
         model = request.model
         return if model.isSynced()
         # Remove the pending model
-        if request.method is 'create'
+        if method is 'create'
           removeFromCache(_context, request).always ->
             delete model.attributes['pending_id'] if model instanceof Backbone.Model
+            request.key = model.getKey()
             addToCache(_context, request, data)
 
-        else if request.method isnt 'delete'
+        else if method isnt 'delete'
             addToCache(_context, request, data)
 
         model.finishSync()
 
-      onPending  : (request) ->
+      onPending  : (request, method) ->
         model = request.model
         return if model.isPending()
-        if request.method isnt 'delete'
+        if method isnt 'delete'
           addToCache(_context, request)
 
         model.pendingSync()
@@ -351,7 +335,7 @@ module.exports = class Mnemosyne
       model = key
       deferred = $.Deferred()
       return deferred.reject() if typeof model.getKey isnt 'function'
-      Utils.store.getItem(getModelKey(model)())
+      Utils.store.getItem(model.getKey())
       .done (value) -> deferred.resolve(value.data)
       .fail -> deferred.reject()
       return deferred
@@ -420,10 +404,10 @@ module.exports = class Mnemosyne
     options     = _.defaults(options, defaultOptions)
     model.cache = _.defaults(model.cache or {}, defaultCacheOptions)
 
-    console.log "\n" + model.getKey()
 
     model.beginSync()
     request = initRequest(method, model, options)
+    console.log "\n---" + request.key
     switch method
       when 'read'
         read(_context, request)
@@ -471,9 +455,6 @@ module.exports = class Mnemosyne
   @SyncMachine = SyncMachine
 
 class MnemosyneModel
-
-  getPendingId: ->
-    return @get('pending_id')
 
   getParentKeys: -> []
 

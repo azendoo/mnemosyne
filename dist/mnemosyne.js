@@ -216,33 +216,19 @@ requestsEmpty = function(request) {
 };
 
 initRequest = function(ctx, req) {
-  var pendingId, request, _base;
-  if (req.key == null) {
-    req.key = function() {
-      return req.model.getKey() + ("/" + (req.model.get('id')));
-    };
-  }
+  var request;
   if (req.options == null) {
     req.options = {};
   }
-  if (request = ctx.pendingRequests.getItem(req.key())) {
+  if (request = ctx.pendingRequests.getItem(req.key)) {
     request.methods[req.method] = req.options;
-    pendingId = request.model.attributes['pending_id'];
     request.model = req.model;
     if (request.deferred.state() !== 'pending') {
       request.deferred = $.Deferred();
     }
-    if (req.model.get('id') == null) {
-      req.model.attributes['pending_id'] = pendingId || new Date().getTime();
-    }
     return optimizeRequest(ctx, request);
   } else {
     req.parentKeys = req.model.getParentKeys();
-    if (!req.model.get('id')) {
-      if ((_base = req.model.attributes)['pending_id'] == null) {
-        _base['pending_id'] = new Date().getTime();
-      }
-    }
     req.deferred = $.Deferred();
     req.methods = {};
     req.methods[req.method] = req.options;
@@ -257,9 +243,9 @@ clearTimer = function(ctx) {
 };
 
 enqueueRequest = function(ctx, request) {
-  ctx.pendingRequests.retrieveItem(request.key());
+  ctx.pendingRequests.retrieveItem(request.key);
   if ((request != null) && !requestsEmpty(request)) {
-    ctx.pendingRequests.addTail(request.key(), request);
+    ctx.pendingRequests.addTail(request.key, request);
   }
   if (ctx.timeout === null) {
     return consumeRequests(ctx);
@@ -284,13 +270,8 @@ onSendFail = function(ctx, request, method, error) {
   if (ctx.interval < MAX_INTERVAL) {
     ctx.interval = ctx.interval * 2;
   }
-  console.debug('onSendFail', request);
   cancelRequest = function() {
-    ctx.callbacks.onCancelled({
-      model: model,
-      key: request.key,
-      method: method
-    });
+    ctx.callbacks.onCancelled(request);
     return request.deferred.reject();
   };
   if (model.cache.enabled) {
@@ -302,11 +283,7 @@ onSendFail = function(ctx, request, method, error) {
         break;
       default:
         enqueueRequest(ctx, request);
-        ctx.callbacks.onPending({
-          model: model,
-          key: request.key,
-          method: method
-        });
+        ctx.callbacks.onPending(request, method);
         request.deferred.resolve(model.attributes);
     }
   } else {
@@ -321,13 +298,8 @@ onSendSuccess = function(ctx, request, method, data) {
   delete request.methods[method];
   ctx.interval = MIN_INTERVAL;
   if (requestsEmpty(request)) {
-    ctx.pendingRequests.retrieveItem(request.key());
-    ctx.callbacks.onSynced({
-      model: model,
-      cache: model.cache,
-      method: method,
-      key: request.key
-    }, data);
+    ctx.pendingRequests.retrieveItem(request.key);
+    ctx.callbacks.onSynced(request, method, data);
     request.deferred.resolve(data);
   } else {
     enqueueRequest(ctx, request);
@@ -341,10 +313,7 @@ sendRequest = function(ctx, request) {
   model = request.model;
   if (method == null) {
     console.warn("DEBUG -- no method in sendRequest");
-    ctx.pendingRequests.retrieveItem(request.key());
-    if (requestsEmpty(request)) {
-      return request.deferred.resolve();
-    }
+    return onSendSuccess(ctx, request, request.method, null);
   }
   if (!Utils.isConnected()) {
     onSendFail(ctx, request, method, 0);
@@ -385,7 +354,7 @@ module.exports = RequestManager = (function() {
     onRestore = function(request) {
       request.model = new Backbone.Model(request.model);
       request.model.getKey = function() {
-        return request.key();
+        return request.key;
       };
       request.model.getParentKeys = function() {
         return request.parentKeys;
@@ -414,11 +383,7 @@ module.exports = RequestManager = (function() {
     if (request == null) {
       return;
     }
-    return this.callbacks.onCancelled({
-      model: request.model,
-      key: request.key,
-      cache: request.model.cache
-    });
+    return this.callbacks.onCancelled(request);
   };
 
   RequestManager.prototype.clear = function() {
@@ -428,11 +393,7 @@ module.exports = RequestManager = (function() {
       _ref = this.pendingRequests.getQueue();
       for (_i = 0, _len = _ref.length; _i < _len; _i++) {
         request = _ref[_i];
-        this.callbacks.onCancelled({
-          model: request.model,
-          key: request.key,
-          cache: request.model.cache
-        });
+        this.callbacks.onCancelled(request);
       }
     } catch (_error) {
       e = _error;
@@ -447,13 +408,8 @@ module.exports = RequestManager = (function() {
     request = initRequest(this, request);
     model = request.model;
     if (requestsEmpty(request)) {
-      this.pendingRequests.retrieveItem(request.key());
-      this.callbacks.onSynced({
-        model: model,
-        cache: model.cache,
-        method: method,
-        key: request.key
-      }, null);
+      this.pendingRequests.retrieveItem(request.key);
+      this.callbacks.onSynced(request, null);
       request.deferred.resolve();
     } else {
       enqueueRequest(this, request);
@@ -650,7 +606,7 @@ module.exports = ConnectionManager = (function() {
 
 });
 
-define('mnemosyne',['require','exports','module','../app/request_manager','../app/sync_machine','../app/utils','../app/connection_manager'],function (require, exports, module) {var ConnectionManager, Mnemosyne, MnemosyneCollection, MnemosyneModel, RequestManager, SyncMachine, Utils, addToCache, defaultCacheOptions, defaultOptions, getModelKey, initRequest, read, removeFromCache, removeFromCollectionCache, removeFromParentsCache, serverRead, updateCollectionCache, updateParentsCache, validCacheValue, wipeCache, _destroy;
+define('mnemosyne',['require','exports','module','../app/request_manager','../app/sync_machine','../app/utils','../app/connection_manager'],function (require, exports, module) {var ConnectionManager, Mnemosyne, MnemosyneCollection, MnemosyneModel, RequestManager, SyncMachine, Utils, addToCache, defaultCacheOptions, defaultOptions, initRequest, read, removeFromCache, removeFromCollectionCache, removeFromParentsCache, serverRead, updateCollectionCache, updateParentsCache, validCacheValue, wipeCache, _destroy;
 
 RequestManager = require("../app/request_manager");
 
@@ -660,37 +616,16 @@ Utils = require("../app/utils");
 
 ConnectionManager = require("../app/connection_manager");
 
-getModelKey = function(model) {
-  var getKey, key;
-  if (model instanceof Backbone.Collection) {
-    key = typeof model.getKey === "function" ? model.getKey() : void 0;
-    getKey = function() {
-      return key;
-    };
-  } else if (typeof model.getKey === 'function') {
-    getKey = function() {
-      var id;
-      if (id = model.get('id')) {
-        return model.getKey() + ("/" + id);
-      } else {
-        return model.getKey() + ("/" + (model.get('pending_id')));
-      }
-    };
-  } else {
-    getKey = function() {
-      return model.get('id');
-    };
-  }
-  return getKey;
-};
-
 initRequest = function(method, model, options) {
   var request;
+  if (model instanceof Backbone.Model && !model.get('id')) {
+    model.attributes['pending_id'] = new Date().getTime();
+  }
   request = {
     model: model,
     options: options,
     method: method,
-    key: getModelKey(model),
+    key: model.getKey(),
     url: _.result(model, 'url')
   };
   return request;
@@ -735,7 +670,7 @@ read = function(ctx, request) {
   if (!model.cache.enabled) {
     return serverRead(ctx, request, deferred);
   }
-  Utils.store.getItem(request.key()).done(function(value) {
+  Utils.store.getItem(request.key).done(function(value) {
     return validCacheValue(ctx, request, value, deferred);
   }).fail(function() {
     return serverRead(ctx, request, deferred);
@@ -823,7 +758,7 @@ removeFromParentsCache = function(ctx, request) {
     if (typeof parentKey === 'string') {
       return removeFromCollectionCache(ctx, request, parentKey);
     } else {
-      return removeFromCollectionCache(ctx, request, parentKey.key());
+      return removeFromCollectionCache(ctx, request, parentKey.key);
     }
   });
   $.when.apply($, deferredArray).then(function() {
@@ -835,7 +770,7 @@ removeFromParentsCache = function(ctx, request) {
 };
 
 removeFromCache = function(ctx, request) {
-  var baseKey, deferred, model;
+  var deferred, model;
   deferred = $.Deferred();
   model = request.model;
   if (model instanceof Backbone.Collection) {
@@ -843,12 +778,9 @@ removeFromCache = function(ctx, request) {
       return deferred.resolve();
     });
   } else {
-    baseKey = model.getKey();
-    Utils.store.removeItem(baseKey + ("/" + (model.get('pending_id')))).always(function() {
-      return Utils.store.removeItem(baseKey + ("/" + (model.get('id')))).always(function() {
-        return removeFromParentsCache(ctx, request).always(function() {
-          return deferred.resolve();
-        });
+    Utils.store.removeItem(request.key).always(function() {
+      return removeFromParentsCache(ctx, request).always(function() {
+        return deferred.resolve();
       });
     });
   }
@@ -948,7 +880,7 @@ addToCache = function(ctx, request, data) {
     console.warn("Wrong instance for ", model);
     return deferred.reject();
   }
-  Utils.store.setItem(request.key(), {
+  Utils.store.setItem(request.key, {
     "data": data,
     "expirationDate": expiredDate
   }).done(function() {
@@ -994,31 +926,32 @@ module.exports = Mnemosyne = (function() {
     this.protectedKeys = options.protectedKeys || [];
     this._connectionManager = new ConnectionManager();
     this._requestManager = new RequestManager({
-      onSynced: function(request, data) {
+      onSynced: function(request, method, data) {
         var model;
         model = request.model;
         if (model.isSynced()) {
           return;
         }
-        if (request.method === 'create') {
+        if (method === 'create') {
           removeFromCache(_context, request).always(function() {
             if (model instanceof Backbone.Model) {
               delete model.attributes['pending_id'];
             }
+            request.key = model.getKey();
             return addToCache(_context, request, data);
           });
-        } else if (request.method !== 'delete') {
+        } else if (method !== 'delete') {
           addToCache(_context, request, data);
         }
         return model.finishSync();
       },
-      onPending: function(request) {
+      onPending: function(request, method) {
         var model;
         model = request.model;
         if (model.isPending()) {
           return;
         }
-        if (request.method !== 'delete') {
+        if (method !== 'delete') {
           addToCache(_context, request);
         }
         return model.pendingSync();
@@ -1072,7 +1005,7 @@ module.exports = Mnemosyne = (function() {
       if (typeof model.getKey !== 'function') {
         return deferred.reject();
       }
-      Utils.store.getItem(getModelKey(model)()).done(function(value) {
+      Utils.store.getItem(model.getKey()).done(function(value) {
         return deferred.resolve(value.data);
       }).fail(function() {
         return deferred.reject();
@@ -1166,9 +1099,9 @@ module.exports = Mnemosyne = (function() {
     deferred = $.Deferred();
     options = _.defaults(options, defaultOptions);
     model.cache = _.defaults(model.cache || {}, defaultCacheOptions);
-    console.log("\n" + model.getKey());
     model.beginSync();
     request = initRequest(method, model, options);
+    console.log("\n---" + request.key);
     switch (method) {
       case 'read':
         read(_context, request).done(function(data) {
@@ -1232,10 +1165,6 @@ module.exports = Mnemosyne = (function() {
 
 MnemosyneModel = (function() {
   function MnemosyneModel() {}
-
-  MnemosyneModel.prototype.getPendingId = function() {
-    return this.get('pending_id');
-  };
 
   MnemosyneModel.prototype.getParentKeys = function() {
     return [];
