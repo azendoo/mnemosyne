@@ -712,6 +712,7 @@ serverRead = function(ctx, request, deferred) {
     });
   }).fail(function(error) {
     console.log("Fail sync from server", arguments);
+    request.model.trigger('fetch:error', error);
     return deferred.reject.apply(this, arguments);
   });
 };
@@ -1114,7 +1115,7 @@ module.exports = Mnemosyne = (function() {
           model.finishSync();
           return deferred.resolve(data);
         }).fail(function() {
-          model.unsync();
+          model.finishSync();
           return deferred.reject.apply(this, arguments);
         });
         break;

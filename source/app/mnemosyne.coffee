@@ -105,6 +105,7 @@ serverRead = (ctx, request, deferred) ->
 
   .fail (error) ->
     console.log "Fail sync from server", arguments
+    request.model.trigger 'fetch:error', error
     deferred.reject.apply(this, arguments)
 
 
@@ -416,7 +417,7 @@ module.exports = class Mnemosyne
           model.finishSync()
           deferred.resolve(data)
         .fail ->
-          model.unsync()
+          model.finishSync()
           deferred.reject.apply this, arguments
 
       when 'delete'
