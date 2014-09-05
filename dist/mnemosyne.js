@@ -617,16 +617,21 @@ Utils = require("../app/utils");
 ConnectionManager = require("../app/connection_manager");
 
 initRequest = function(method, model, options) {
-  var request;
+  var enabled, request, _ref;
   if (model instanceof Backbone.Model && !model.get('id')) {
     model.attributes['pending_id'] = new Date().getTime();
+  }
+  enabled = model.cache.enabled;
+  if (((_ref = options.data) != null ? _ref.page : void 0) > 1) {
+    enabled = false;
   }
   request = {
     model: model,
     options: options,
     method: method,
     key: model.getKey(),
-    url: _.result(model, 'url')
+    url: _.result(model, 'url'),
+    cacheEnabled: enabled
   };
   return request;
 };
@@ -667,7 +672,7 @@ read = function(ctx, request) {
   var deferred, model;
   deferred = $.Deferred();
   model = request.model;
-  if (!model.cache.enabled) {
+  if (!request.cacheEnabled) {
     return serverRead(ctx, request, deferred);
   }
   Utils.store.getItem(request.key).done(function(value) {
@@ -863,7 +868,7 @@ addToCache = function(ctx, request, data) {
   var deferred, expiredDate, model;
   deferred = $.Deferred();
   model = request.model;
-  if (!model.cache.enabled) {
+  if (!request.cacheEnabled) {
     return deferred.resolve();
   }
   expiredDate = (new Date()).getTime() + model.cache.ttl * 1000;

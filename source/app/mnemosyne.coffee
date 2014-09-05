@@ -10,6 +10,8 @@ ConnectionManager = require "../app/connection_manager"
 initRequest = (method, model, options) ->
   if model instanceof Backbone.Model and not model.get('id')
     model.attributes['pending_id'] = new Date().getTime()
+  enabled = model.cache.enabled
+  enabled = false if options.data?.page > 1
   request =
     model: model
     options: options
@@ -17,6 +19,7 @@ initRequest = (method, model, options) ->
     # Lock important values to avoid conflicts on pagination
     key  : model.getKey()
     url  : _.result(model, 'url')
+    cacheEnabled: enabled
 
   return request
 
@@ -54,7 +57,7 @@ read = (ctx, request) ->
   deferred = $.Deferred()
   model = request.model
 
-  if not model.cache.enabled
+  if not request.cacheEnabled
     return serverRead(ctx, request, deferred)
 
   Utils.store.getItem(request.key)
@@ -227,7 +230,7 @@ updateParentsCache = (ctx, request) ->
 addToCache = (ctx, request, data) ->
   deferred = $.Deferred()
   model = request.model
-  return deferred.resolve() if not model.cache.enabled
+  return deferred.resolve() if not request.cacheEnabled
 
   expiredDate = (new Date()).getTime() + model.cache.ttl * 1000
 
