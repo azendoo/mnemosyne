@@ -132,7 +132,7 @@ define('../app/utils',['require','exports','module'],function (require, exports,
 module.exports = Utils = (function() {
   function Utils() {}
 
-  Utils.isConnected = function() {
+  Utils.isOnline = function() {
     if (window.device && (window.navigator.connection != null)) {
       return window.navigator.connection.type !== Connection.NONE;
     } else {
@@ -219,6 +219,9 @@ initRequest = function(ctx, req) {
   var request;
   if (req.options == null) {
     req.options = {};
+  }
+  if (req.key == null) {
+    req.key = req.model.getKey();
   }
   if (request = ctx.pendingRequests.getItem(req.key)) {
     request.methods[req.method] = req.options;
@@ -315,7 +318,7 @@ sendRequest = function(ctx, request) {
     console.warn("DEBUG -- no method in sendRequest");
     return onSendSuccess(ctx, request, request.method, null);
   }
-  if (!Utils.isConnected()) {
+  if (!ctx.connectionManager.isOnline()) {
     onSendFail(ctx, request, method, 0);
   } else {
     pendingId = model.attributes["pending_id"];
@@ -347,9 +350,10 @@ defaultCallbacks = {
 };
 
 module.exports = RequestManager = (function() {
-  function RequestManager(callbacks) {
+  function RequestManager(callbacks, connectionManager) {
     var onRestore;
     this.callbacks = callbacks != null ? callbacks : {};
+    this.connectionManager = connectionManager;
     _.defaults(this.callbacks, defaultCallbacks);
     onRestore = function(request) {
       request.model = new Backbone.Model(request.model);
@@ -545,14 +549,15 @@ module.exports = ConnectionManager = (function() {
 
   ConnectionManager.prototype._connectionRecoveredCallbacks = {};
 
-  function ConnectionManager() {
+  function ConnectionManager(isOnline) {
+    this.isOnline = isOnline != null ? isOnline : Utils.isOnline;
     this._watchConnection = __bind(this._watchConnection, this);
     this._watchConnection();
-    this.onLine = Utils.isConnected();
+    this.onLine = this.isOnline();
   }
 
   ConnectionManager.prototype._watchConnection = function() {
-    if (Utils.isConnected() && !this.onLine) {
+    if (this.isOnline() && !this.onLine) {
       _.map(this._connectionRecoveredCallbacks, function(callback) {
         var e;
         try {
@@ -562,7 +567,7 @@ module.exports = ConnectionManager = (function() {
           return console.error("Cannot call ", callback);
         }
       });
-    } else if (!Utils.isConnected() && this.onLine) {
+    } else if (!this.isOnline() && this.onLine) {
       _.map(this._connectionLostCallbacks, function(callback) {
         var e;
         try {
@@ -573,7 +578,7 @@ module.exports = ConnectionManager = (function() {
         }
       });
     }
-    this.onLine = Utils.isConnected();
+    this.onLine = this.isOnline();
     return setTimeout(this._watchConnection, _CHECK_INTERVAL);
   };
 
@@ -594,10 +599,6 @@ module.exports = ConnectionManager = (function() {
   ConnectionManager.prototype.unsubscribe = function(key) {
     delete this._connectionLostCallbacks[key];
     return delete this._connectionRecoveredCallbacks[key];
-  };
-
-  ConnectionManager.prototype.isOnline = function() {
-    return Utils.isConnected();
   };
 
   return ConnectionManager;
@@ -684,40 +685,41 @@ read = function(ctx, request) {
 };
 
 validCacheValue = function(ctx, request, value, deferred) {
-  var model;
+  var model, _base, _base1;
   model = request.model;
   if (request.options.forceRefresh) {
     return serverRead(ctx, request, deferred);
   } else if (value.expirationDate < new Date().getTime()) {
-    console.debug('cache expired');
     if (model.cache.allowExpiredCache && (value != null)) {
+      if (typeof (_base = request.options).success === "function") {
+        _base.success(value.data, 'success', null);
+      }
       deferred.resolve(value.data);
     }
     return serverRead(ctx, request, deferred);
   } else {
-    console.debug(' cache valid');
+    if (typeof (_base1 = request.options).success === "function") {
+      _base1.success(value.data, 'success', null);
+    }
     return deferred.resolve(value.data);
   }
 };
 
 serverRead = function(ctx, request, deferred) {
   console.log("Sync from server");
-  if (!Utils.isConnected()) {
+  if (!ctx.isOnline()) {
     console.log('No connection');
-    if (request.model instanceof Backbone.Collection) {
-      return deferred.reject();
-    } else {
-      return deferred.reject();
-    }
+    deferred.reject();
   }
-  return Backbone.sync('read', request.model, request.options).done(function(data) {
+  return Backbone.sync('read', request.model, request.options).done(function() {
+    var data;
+    data = arguments;
     console.log("Succeed sync from server");
-    return addToCache(ctx, request, data).always(function() {
-      return deferred.resolve(data);
+    return addToCache(ctx, request, data[0]).always(function() {
+      return deferred.resolve.apply(this, data);
     });
-  }).fail(function(error) {
+  }).fail(function() {
     console.log("Fail sync from server", arguments);
-    request.model.trigger('fetch:error', error);
     return deferred.reject.apply(this, arguments);
   });
 };
@@ -930,7 +932,7 @@ module.exports = Mnemosyne = (function() {
       options = {};
     }
     this.protectedKeys = options.protectedKeys || [];
-    this._connectionManager = new ConnectionManager();
+    this._connectionManager = new ConnectionManager(options.isOnline);
     this._requestManager = new RequestManager({
       onSynced: function(request, method, data) {
         var model;
@@ -973,7 +975,7 @@ module.exports = Mnemosyne = (function() {
         }
         return model.unsync();
       }
-    });
+    }, this._connectionManager);
     _context = this;
   }
 
@@ -1110,17 +1112,11 @@ module.exports = Mnemosyne = (function() {
     console.log("\n---" + request.key);
     switch (method) {
       case 'read':
-        read(_context, request).done(function(data) {
-          if (data == null) {
-            data = [];
-          }
-          if (typeof options.success === "function") {
-            options.success(data, 'success', null);
-          }
+        read(_context, request).done(function() {
           model.finishSync();
-          return deferred.resolve(data);
+          return deferred.resolve.apply(this, arguments);
         }).fail(function() {
-          model.finishSync();
+          model.unsync();
           return deferred.reject.apply(this, arguments);
         });
         break;

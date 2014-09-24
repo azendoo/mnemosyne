@@ -10,13 +10,13 @@ module.exports = class  ConnectionManager
   _connectionLostCallbacks      : {}
   _connectionRecoveredCallbacks : {}
 
-  constructor: ->
+  constructor: (@isOnline = Utils.isOnline)->
     @_watchConnection()
-    @onLine = Utils.isConnected()
+    @onLine = @isOnline()
 
   _watchConnection: =>
     # Connection revovered
-    if Utils.isConnected() and not @onLine
+    if @isOnline() and not @onLine
       _.map(@_connectionRecoveredCallbacks, (callback) ->
         try
           callback(true)
@@ -25,7 +25,7 @@ module.exports = class  ConnectionManager
           )
 
     # Connection lost
-    else if not Utils.isConnected() and @onLine
+    else if not @isOnline() and @onLine
       _.map(@_connectionLostCallbacks, (callback) ->
         try
           callback(false)
@@ -33,7 +33,7 @@ module.exports = class  ConnectionManager
           console.error "Cannot call ", callback
           )
 
-    @onLine = Utils.isConnected()
+    @onLine = @isOnline()
     setTimeout(@_watchConnection, _CHECK_INTERVAL)
 
   subscribe: (event, key, callback) ->
@@ -49,5 +49,3 @@ module.exports = class  ConnectionManager
   unsubscribe: (key) ->
     delete @_connectionLostCallbacks[key]
     delete @_connectionRecoveredCallbacks[key]
-
-  isOnline: -> Utils.isConnected()

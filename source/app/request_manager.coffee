@@ -31,6 +31,7 @@ requestsEmpty = (request) ->
 # Store all needed information into a request object
 initRequest = (ctx, req) ->
   req.options ?= {}
+  req.key ?= req.model.getKey()
   # Is there allready some pending request for this model?
   if request = ctx.pendingRequests.getItem(req.key)
     request.methods[req.method] = req.options
@@ -120,7 +121,7 @@ sendRequest = (ctx, request) ->
     console.warn "DEBUG -- no method in sendRequest"
     return onSendSuccess(ctx, request, request.method, null)
 
-  if not Utils.isConnected()
+  if not ctx.connectionManager.isOnline()
     onSendFail(ctx, request, method, 0)
     return
 
@@ -163,7 +164,7 @@ module.exports = class RequestManager
 
   # You can give 3 differents callbacks: `onSynced`, `onPending`
   # and `onCancelled`
-  constructor: (@callbacks={}) ->
+  constructor: (@callbacks={}, @connectionManager) ->
     _.defaults(@callbacks, defaultCallbacks)
 
     onRestore = (request) ->

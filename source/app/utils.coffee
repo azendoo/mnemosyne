@@ -3,7 +3,7 @@
 module.exports = class Utils
 
   # Return true if we are connected, false otherwise ;)
-  @isConnected = ->
+  @isOnline = ->
     # Require cordova plugin org.apache.cordova.core.network-information
     if window.device && window.navigator.connection?
       return window.navigator.connection.type isnt Connection.NONE
