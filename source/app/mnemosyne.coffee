@@ -78,15 +78,17 @@ validCacheValue = (ctx, request, value, deferred) ->
 
   # -- Cache expired
   else if value.expirationDate < new Date().getTime()
-    console.debug 'cache expired'
+    # console.debug 'cache expired'
     if model.cache.allowExpiredCache and value?
+      request.options.success?(value.data, 'success', null)
       deferred.resolve(value.data)
     # Try to sync with server
     return serverRead(ctx, request, deferred)
 
   # -- Cache valid
   else
-    console.debug ' cache valid'
+    # console.debug ' cache valid'
+    request.options.success?(value.data, 'success', null)
     return deferred.resolve(value.data)
 
 
@@ -94,22 +96,20 @@ validCacheValue = (ctx, request, value, deferred) ->
 serverRead = (ctx, request, deferred) ->
   console.log "Sync from server"
 
-  if not Utils.isConnected()
+  if not ctx.isOnline()
     console.log 'No connection'
-    if request.model instanceof Backbone.Collection
-      return deferred.reject()
-    else
-      return deferred.reject()
+    deferred.reject()
 
   Backbone.sync('read', request.model, request.options)
-  .done (data)->
+  .done ->
+    data = arguments
     console.log "Succeed sync from server"
-    addToCache(ctx, request, data).always -> deferred.resolve(data)
+    addToCache(ctx, request, data[0]).always ->
+      deferred.resolve.apply this, data
 
-  .fail (error) ->
+  .fail ->
     console.log "Fail sync from server", arguments
-    request.model.trigger 'fetch:error', error
-    deferred.reject.apply(this, arguments)
+    deferred.reject.apply this, arguments
 
 
 # Remove the value of model attributes from the collection
@@ -277,7 +277,7 @@ module.exports = class Mnemosyne
   _context = null
   constructor: (options={}) ->
     @protectedKeys = options.protectedKeys or []
-    @_connectionManager = new ConnectionManager()
+    @_connectionManager = new ConnectionManager(options.isOnline)
     @_requestManager    = new RequestManager
       onSynced  : (request, method, data) ->
         model = request.model
@@ -310,6 +310,8 @@ module.exports = class Mnemosyne
           removeFromCache(_context, request)
 
         model.unsync()
+      ,
+      @_connectionManager
 
     _context = @
 
@@ -415,12 +417,11 @@ module.exports = class Mnemosyne
     switch method
       when 'read'
         read(_context, request)
-        .done (data=[]) ->
-          options.success?(data, 'success', null)
+        .done ->
           model.finishSync()
-          deferred.resolve(data)
+          deferred.resolve.apply this, arguments
         .fail ->
-          model.finishSync()
+          model.unsync()
           deferred.reject.apply this, arguments
 
       when 'delete'
