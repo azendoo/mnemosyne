@@ -177,14 +177,14 @@ module.exports = describe 'Request Manager specifications', ->
           expect(deferred.state()).to.be.equal("resolved")
           done()
 
-      # it 'should trigger "pending" event on model', (done) ->
-      #   model1.beginSync()
-      #   model1.on "pending", -> done()
-      #   requestManager.sync({method: 'update', model: model1})
-      #
-      # it 'should trigger "pending" event on model if the request fail and is pushed in queue', (done) ->
-      #   model1.on "pending", -> done()
-      #   requestManager.sync({method: 'update', model: model1})
+      it 'should trigger "pending" event on model', (done) ->
+        model1.beginSync()
+        model1.on "pending", -> done()
+        requestManager.sync({method: 'update', model: model1})
+
+      it 'should trigger "pending" event on model if the request fail and is pushed in queue', (done) ->
+        model1.on "pending", -> done()
+        requestManager.sync({method: 'update', model: model1})
 
       describe 'Spec getPendingRequests', ->
         beforeEach ->
