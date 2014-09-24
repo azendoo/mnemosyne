@@ -12,7 +12,7 @@ module.exports = describe 'Mnemosyne specifications', ->
   Mnemosyne = require 'mnemosyne'
   mnemosyne = null
   serverSpy = null
-
+  online = true
 
   setUpServerResponse = (statusCode = 200)->
     server.respondWith (xhr) ->
@@ -45,7 +45,8 @@ module.exports = describe 'Mnemosyne specifications', ->
 
 
   before ->
-    mnemosyne = new Mnemosyne()
+
+    mnemosyne = new Mnemosyne(isOnline: -> online)
 
     class CustomModel extends Backbone.Model
       cache:
@@ -71,7 +72,7 @@ module.exports = describe 'Mnemosyne specifications', ->
   beforeEach ->
     localStorage.clear()
     mnemosyne = null
-    mnemosyne = new Mnemosyne()
+    mnemosyne = new Mnemosyne(isOnline: -> online)
     serverSpy = sinon.spy()
     server = sinon.fakeServer.create()
     model = new CustomModel(id:1)
@@ -511,6 +512,7 @@ module.exports = describe 'Mnemosyne specifications', ->
   ###
   describe 'Offline', ->
     beforeEach ->
+      online = false
       serverAutoRespondError()
 
     describe 'Cache invalidation', ->
@@ -631,11 +633,8 @@ module.exports = describe 'Mnemosyne specifications', ->
             collection.cache.allowExpiredCache = false
 
           it 'should trigger "unsynced" event on model', (done) ->
-            completed = false
-            model.on "unsynced", -> completed = true
-            model.fetch().always ->
-              expect(completed).to.be.true
-              done()
+            model.on "unsynced", -> done()
+            model.fetch()
 
           it 'should trigger "unsynced" event on collection', (done) ->
             completed = false
