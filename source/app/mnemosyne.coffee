@@ -108,9 +108,11 @@ serverRead = (ctx, request, deferred) ->
       deferred.resolve.apply this, data
 
   .fail ->
-    request.model.trigger "error:status", arguments[0].status
     console.log "Fail sync from server", arguments
     deferred.reject.apply this, arguments
+
+  .always ->
+    request.model.trigger 'sync:args', arguments[0], arguments[1], arguments[2]
 
 
 # Remove the value of model attributes from the collection

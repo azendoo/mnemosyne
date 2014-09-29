@@ -719,9 +719,10 @@ serverRead = function(ctx, request, deferred) {
       return deferred.resolve.apply(this, data);
     });
   }).fail(function() {
-    request.model.trigger("error:status", arguments[0].status);
     console.log("Fail sync from server", arguments);
     return deferred.reject.apply(this, arguments);
+  }).always(function() {
+    return request.model.trigger('sync:args', arguments[0], arguments[1], arguments[2]);
   });
 };
 
