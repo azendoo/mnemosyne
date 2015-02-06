@@ -7,13 +7,6 @@ removeValue = (ctx, key) ->
   delete  ctx.dict[key]
   return value
 
-#Sync the queue with database
-dbSync = (ctx) ->
-  return
-  # _.defer ->
-  #   localStorage.setItem(ctx.key + '.orderedKeys', JSON.stringify(ctx.orderedKeys))
-  #   localStorage.setItem(ctx.key + '.dict', JSON.stringify(ctx.dict))
-
 DEFAULT_STORAGE_KEY = 'mnemosyne.pendingRequests'
 
 module.exports = class MagicQueue
@@ -28,14 +21,12 @@ module.exports = class MagicQueue
     @retrieveItem(key)
     @orderedKeys.push(key)
     @dict[key] = value
-    dbSync(this)
 
 
   addTail: (key, value) ->
     @retrieveItem(key)
     @orderedKeys.unshift(key)
     @dict[key] = value
-    dbSync(this)
 
 
   getHead: ->
@@ -59,7 +50,6 @@ module.exports = class MagicQueue
     return null if @orderedKeys.length is 0
     key   = @orderedKeys.pop()
     value = removeValue(@, key)
-    dbSync(this)
     return value
 
 
@@ -67,7 +57,6 @@ module.exports = class MagicQueue
     return null if @orderedKeys.length is 0
     key   = @orderedKeys.shift()
     value = removeValue(@, key)
-    dbSync(this)
     return value
 
 
@@ -76,7 +65,6 @@ module.exports = class MagicQueue
     indexKey = @orderedKeys.indexOf(key)
     @orderedKeys.splice(indexKey, 1)
     value = removeValue(@, key)
-    dbSync(this)
     return value
 
 
@@ -93,4 +81,3 @@ module.exports = class MagicQueue
   clear: ->
     @orderedKeys = []
     @dict = {}
-    dbSync(this)
