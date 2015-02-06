@@ -1,7 +1,11 @@
+== v0.2.2 :
+  * bug fixes :
+    * request was not properly removed from queue
+    
 == v0.2.1 :
   * bug fixes :
     * removes request from queue when cancelled
-    
+
 == v0.2.0 :
   * enhancements :
     * remove ttl and cache expired notion
