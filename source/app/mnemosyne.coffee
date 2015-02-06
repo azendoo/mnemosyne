@@ -1,9 +1,19 @@
 RequestManager = require "../app/request_manager"
 SyncMachine    = require "../app/sync_machine"
 Utils          = require "../app/utils"
-ConnectionManager = require "../app/connection_manager"
+debug          = Utils.debug
 # Backbone = require "backbone"
 # _        = require "underscore"
+
+MNEMOSYNE_DB_VERSION = 1
+
+# Check if the version has been updated, wipeCache in this case
+checkVersion = (ctx) ->
+  Utils.store.getItem("MNEMOSYNE_DB_VERSION")
+  .done (previousBaseVersion) ->
+    wipeCache(ctx) if previousBaseVersion < MNEMOSYNE_DB_VERSION
+  .fail -> wipeCache(ctx)
+
 
 
 # Init the request object
@@ -26,6 +36,7 @@ initRequest = (method, model, options) ->
 
 # Empty the database saving and restoring protected keys list
 wipeCache= (ctx) ->
+  console.log("Mnemosyne: wipe cache")
   deferred = $.Deferred()
   backup = []
   deferredArray = _.map(ctx.protectedKeys, (protectedKey) ->
@@ -41,6 +52,7 @@ wipeCache= (ctx) ->
     ->
       Utils.store.clear()
       .done ->
+        Utils.store.setItem("MNEMOSYNE_DB_VERSION", MNEMOSYNE_DB_VERSION)
         for val in backup
           Utils.store.setItem(val.key, val.value)
         deferred.resolve()
@@ -55,64 +67,31 @@ wipeCache= (ctx) ->
 # Read the value from cache / server depending on conditions
 read = (ctx, request) ->
   deferred = $.Deferred()
-  model = request.model
 
-  if not request.cacheEnabled
-    return serverRead(ctx, request, deferred)
+  serverRead(ctx, request)
+  .done ->
+    debug("read","success")
+    deferred.resolve.apply this, arguments
 
-  Utils.store.getItem(request.key)
-  .done (value) ->
-    validCacheValue(ctx, request, value, deferred)
   .fail ->
-    serverRead(ctx, request, deferred)
+    debug("read","fail")
+    args = arguments
+    ctx.cacheRead(request.key)
+    .done -> deferred.resolve.apply this, arguments
+    .fail -> deferred.reject.apply this, args
 
   return deferred
 
 
-# Decide to use or update the value depending on
-# value.expirationDate, options.forceRefresh, and model.cache.allowExpiredCache
-validCacheValue = (ctx, request, value, deferred) ->
-  model = request.model
-  if request.options.forceRefresh
-    return serverRead(ctx, request, deferred)
-
-  # -- Cache expired
-  else if value.expirationDate < new Date().getTime()
-    # console.debug 'cache expired'
-    if model.cache.allowExpiredCache and value?
-      request.options.success?(value.data, 'success', null)
-      deferred.resolve(value.data)
-    # Try to sync with server
-    return serverRead(ctx, request, deferred)
-
-  # -- Cache valid
-  else
-    # console.debug ' cache valid'
-    request.options.success?(value.data, 'success', null)
-    return deferred.resolve(value.data)
-
-
 # Sync `READ` the model with server
-serverRead = (ctx, request, deferred) ->
-  console.log "Sync from server"
-
-  if not ctx.isOnline()
-    console.log 'No connection'
-    deferred.reject()
-
+serverRead = (ctx, request) ->
   Backbone.sync('read', request.model, request.options)
-  .done ->
-    data = arguments
-    console.log "Succeed sync from server"
-    addToCache(ctx, request, data[0]).always ->
-      deferred.resolve.apply this, data
+  .done (value)->
+    debug("serverRead", "success")
+    addToCache(ctx, request, value)
 
-  .fail ->
-    console.log "Fail sync from server", arguments
-    deferred.reject.apply this, arguments
-
-  .always ->
-    request.model.trigger 'sync:args', arguments[0], arguments[1], arguments[2]
+  .fail -> debug("serverRead", "fail")
+  .always -> request.model.trigger 'sync:args', arguments[0], arguments[1], arguments[2]
 
 
 # Remove the value of model attributes from the collection
@@ -122,12 +101,12 @@ removeFromCollectionCache = (ctx, request, collectionKey) ->
 
   Utils.store.getItem(collectionKey)
   .done (value) ->
-    models = value.data
+    models = value
     if model.get('pending_id')
       models = _.filter(models, (m) -> m.pending_id isnt model.get('pending_id'))
     if model.get('id')
       models = _.filter(models, (m) -> m.id isnt model.get('id'))
-    Utils.store.setItem(collectionKey, {"data" : models, "expirationDate" : value.expirationDate})
+    Utils.store.setItem(collectionKey, models)
     .done -> deferred.resolve()
     .fail -> onDataBaseError(ctx)
   .fail ->
@@ -177,7 +156,7 @@ updateCollectionCache = (ctx, request, collectionKey) ->
 
   Utils.store.getItem(collectionKey)
   .done (value) ->
-    models = value.data
+    models = value
     if model.get('pending_id')
       parentModel = _.findWhere(models, "pending_id": model.get('pending_id'))
     else
@@ -189,7 +168,7 @@ updateCollectionCache = (ctx, request, collectionKey) ->
     else
       # Add the model
       models.unshift(model.attributes)
-    Utils.store.setItem(collectionKey, {"data" : models, "expirationDate": 0})
+    Utils.store.setItem(collectionKey, models)
     .done -> deferred.resolve()
     .fail ->
       wipeCache(ctx)
@@ -197,7 +176,7 @@ updateCollectionCache = (ctx, request, collectionKey) ->
 
   .fail ->
     # Create the collection in cache and add the model
-    Utils.store.setItem(collectionKey, {"data" : [model.attributes], "expirationDate": 0})
+    Utils.store.setItem(collectionKey, [model.attributes])
     .done -> deferred.resolve()
     .fail ->
       wipeCache(ctx)
@@ -235,25 +214,27 @@ addToCache = (ctx, request, data) ->
   model = request.model
   return deferred.resolve() if not request.cacheEnabled
 
-  expiredDate = (new Date()).getTime() + model.cache.ttl * 1000
-
   if model instanceof Backbone.Model
     data ?= model.attributes
 
   else if model instanceof Backbone.Collection
     data ?= _.map(model.models, (m) -> m.attributes)
+    if request.options.data?.page > 1
+      console.warn 'Attempting to save page > 1'
+      return deferred.resolve()
 
   else
     console.warn "Wrong instance for ", model
     return deferred.reject()
 
-  Utils.store.setItem(request.key, {"data" : data, "expirationDate": expiredDate})
+  Utils.store.setItem(request.key, data)
   .done ->
-    console.log "Succeed cache write"
+    debug("addToCache", "success")
     updateParentsCache(ctx, request)
     .always ->
       deferred.resolve()
   .fail ->
+    debug("addToCache", "fail")
     wipeCache(ctx)
     deferred.reject()
 
@@ -269,19 +250,14 @@ defaultOptions =
 
 defaultCacheOptions =
   enabled : no
-  ttl     : 0 # seconds
-  allowExpiredCache : yes
 
 module.exports = class Mnemosyne
 
   _requestManager: null
-  _connectionManager: null
-
   _context = null
   constructor: (options={}) ->
     @protectedKeys = options.protectedKeys or []
-    @_connectionManager = new ConnectionManager(options.isOnline)
-    @_requestManager    = new RequestManager
+    @_requestManager = new RequestManager
       onSynced  : (request, method, data) ->
         model = request.model
         return if model.isSynced()
@@ -313,10 +289,9 @@ module.exports = class Mnemosyne
           removeFromCache(_context, request)
 
         model.unsync()
-      ,
-      @_connectionManager
 
     _context = @
+    checkVersion(_context)
 
 
   ###
@@ -341,15 +316,8 @@ module.exports = class Mnemosyne
   ###
   cacheRead  : (key) ->
     if key instanceof Backbone.Model or key instanceof Backbone.Collection
-      model = key
-      deferred = $.Deferred()
-      return deferred.reject() if typeof model.getKey isnt 'function'
-      Utils.store.getItem(model.getKey())
-      .done (value) -> deferred.resolve(value.data)
-      .fail -> deferred.reject()
-      return deferred
+      key = key.getKey()
     return Utils.store.getItem(key)
-
 
   ###
     Remove a value, model or a collection from cache.
@@ -413,14 +381,14 @@ module.exports = class Mnemosyne
     options     = _.defaults(options, defaultOptions)
     model.cache = _.defaults(model.cache or {}, defaultCacheOptions)
 
-
     model.beginSync()
     request = initRequest(method, model, options)
-    console.log "\n---" + request.key
+    debug("sync", request.key)
     switch method
       when 'read'
         read(_context, request)
         .done ->
+          options.success?.apply this, arguments
           model.finishSync()
           deferred.resolve.apply this, arguments
         .fail ->
@@ -435,29 +403,6 @@ module.exports = class Mnemosyne
         deferred = _context._requestManager.sync(request)
 
     return deferred
-
-
-  ###
-    Allow you to register a callback on severals events
-    The `key` is to provide easier unsubcription when using
-    anonymous function.
-  ###
-  subscribe: (event, key, callback)->
-    _context._connectionManager.subscribe(event, key, callback)
-
-
-  ###
-    Allow you to unregister a callback for a given key
-  ###
-  unsubscribe: (key) ->
-    _context._connectionManager.unsubscribe(event, key)
-
-
-  ###
-    return a boolean
-  ###
-  isOnline: -> _context._connectionManager.isOnline()
-
 
   # Export sync machine
   @SyncMachine = SyncMachine

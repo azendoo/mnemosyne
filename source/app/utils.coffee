@@ -2,14 +2,9 @@
 
 module.exports = class Utils
 
-  # Return true if we are connected, false otherwise ;)
-  @isOnline = ->
-    # Require cordova plugin org.apache.cordova.core.network-information
-    if window.device && window.navigator.connection?
-      return window.navigator.connection.type isnt Connection.NONE
-    else
-      return window.navigator.onLine
-
+  @debug = (context, message) ->
+    return unless window.DEBUG_MNEMOSYNE
+    console.debug("[#{context}] #{message}")
 
   @addWithoutDuplicates = (array, model) ->
     return if not model?
@@ -17,8 +12,6 @@ module.exports = class Utils
     array.unshift(model)
     return array
 
-
-  # Temporary use localStorage for easy debugging, (-> use localForage)
   @store = {}
   @store.getItem = (key) ->
     value = localStorage.getItem(key)

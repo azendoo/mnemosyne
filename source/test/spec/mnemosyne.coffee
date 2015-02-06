@@ -70,7 +70,6 @@ module.exports = describe 'Mnemosyne specifications', ->
 
 
   beforeEach ->
-    localStorage.clear()
     mnemosyne = null
     mnemosyne = new Mnemosyne(isOnline: -> online)
     serverSpy = sinon.spy()
@@ -91,7 +90,6 @@ module.exports = describe 'Mnemosyne specifications', ->
   afterEach ->
     server.restore()
     mnemosyne.cacheClear()
-    localStorage.clear()
 
 
 
@@ -101,6 +99,12 @@ module.exports = describe 'Mnemosyne specifications', ->
   serverAutoRespondOk = ->
     setUpServerResponse()
     server.autoRespond = true
+
+  serverSetOffline= ->
+    sinon.stub(Backbone, "sync", -> $.Deferred().reject(readyState: 0))
+
+  serverSetOnline= ->
+    Backbone.sync.restore()
 
 
   ###
@@ -167,15 +171,15 @@ module.exports = describe 'Mnemosyne specifications', ->
           ]
         model.save().done ->
           mnemosyne.cacheRead('parentKey1').done (value)->
-            expect(value.data.length).to.equal(1)
+            expect(value.length).to.equal(1)
             mnemosyne.cacheRead('parentKey2').done (value)->
-              expect(value.data.length).to.equal(1)
+              expect(value.length).to.equal(1)
               shouldBeInParentCollection = false
               model.save().done ->
                 mnemosyne.cacheRead('parentKey1').done (value)->
-                  expect(value.data.length).to.be.empty
+                  expect(value.length).to.be.empty
                   mnemosyne.cacheRead('parentKey2').done (value)->
-                    expect(value.data.length).to.be.empty
+                    expect(value.length).to.be.empty
                     done()
 
     describe 'Read value', ->
@@ -255,8 +259,8 @@ module.exports = describe 'Mnemosyne specifications', ->
       ###
       describe 'Cache valid', ->
         beforeEach (done) ->
-          model.cache = {enabled : true, ttl: 600}
-          collection.cache = {enabled :true, ttl: 600}
+          model.cache = {enabled : true}
+          collection.cache = {enabled :true}
           model.setName("cacheModel")
           mnemosyne.cacheWrite(model)
           .done -> done()
@@ -269,38 +273,28 @@ module.exports = describe 'Mnemosyne specifications', ->
           collection.on "synced", -> done()
           collection.fetch()
 
-        it 'should get data from cache when fetching model', (done) ->
+        it 'should get data from server when fetching model', (done) ->
           model.setName("defaultName")
           model.fetch()
           .done ->
-            expect(model.getName()).to.be.equal("cacheModel")
+            expect(model.getName()).to.be.equal("serverModel1")
             done()
 
-        it 'should get data from cache when fetching collection', (done) ->
+        it 'should get data from server when fetching collection', (done) ->
           model.setName(17)
           collection.push(model)
           collection.push(model2)
           mnemosyne.cacheWrite(collection).done ->
             collection = new CustomCollection()
-            collection.cache = {enabled :true, ttl: 600}
+            collection.cache = {enabled :true}
             expect(collection.models).to.be.empty
             collection.fetch().done ->
-              expect(collection.get(1).getName()).equals(17)
+              expect(collection.get(1).getName()).equals("serverModel1")
               done()
 
-        it 'should not call server when fetching model', (done) ->
-          server.autoRespond = true
-          model.on "synced", ->
-            expect(serverSpy).to.not.have.been.called
-            done()
-          model.fetch()
+        it 'should not read cache when fetching model'
 
-        it 'should not call server when fetching collection', (done) ->
-          server.autoRespond = true
-          collection.on "synced", ->
-            expect(serverSpy).to.not.have.been.called
-            done()
-          collection.fetch()
+        it 'should not read cache when fetching collection'
 
 
         ###
@@ -338,87 +332,6 @@ module.exports = describe 'Mnemosyne specifications', ->
               mnemosyne.cacheRead(collection).done (value) ->
                 expect(value[0].name).equals("serverModel1")
                 done()
-
-
-
-      ###
-                  READ - ONLINE - CACHE EXPIRED
-      ###
-      describe 'Cache expired', ->
-        beforeEach (done) ->
-          model.cache = {enabled : true, ttl: 0}
-          collection.cache = {enabled : true, ttl: 0}
-          model.setName("defaultName")
-          mnemosyne.cacheWrite(model).done -> done()
-
-        it 'should trigger "synced" event on model', (done) ->
-          model.on "synced", -> done()
-          model.fetch()
-
-        it 'should trigger "synced" event on collection', (done) ->
-          collection.on "synced", -> done()
-          collection.fetch()
-
-        it 'should get data from cache when fetching model', (done) ->
-          model.setName("")
-          model.fetch().done ->
-            expect(model.getName()).equals("defaultName")
-            done()
-
-        it 'should get data from cache when fetching collection', (done) ->
-          collection.fetch().done ->
-            expect(collection.get(1).getName()).equals("defaultName")
-            done()
-
-        it 'should get data from cache, and after, update it with server data'
-
-        ###
-                    READ - ONLINE - CACHE EXPIRED - "allowExpiredCache : false"
-        ###
-        describe '"allowExpiredCache" set to false', ->
-          beforeEach ->
-            model.cache.allowExpiredCache = false
-            collection.cache.allowExpiredCache = false
-
-          it 'should trigger "synced" event on model', (done) ->
-            model.on "synced", ->
-              done()
-            model.fetch()
-
-          it 'should trigger "synced" event on collection', (done) ->
-            collection.on "synced", ->
-              done()
-            collection.fetch()
-
-          it 'should not use data from cache when fetching model', (done) ->
-            model.fetch()
-            .done ->
-              expect(model.getName()).equals("serverModel1")
-              done()
-
-          it 'should not use data from cache when fetching collection', (done) ->
-            collection.fetch()
-            .done ->
-              expect(collection.get(1).getName()).equals("serverModel1")
-              done()
-
-          it 'should write back server data in cache when fetching model', (done) ->
-            model.setName("")
-            mnemosyne.cacheWrite(model).done ->
-              model.fetch().done ->
-                mnemosyne.cacheRead(model).done (value) ->
-                  expect(value.name).to.equals("serverModel1")
-                  done()
-
-          it 'should write back server data in cache when fetching collection', (done) ->
-            collection.reset([])
-            mnemosyne.cacheWrite(collection).done ->
-              mnemosyne.cacheRead(collection).done (value) ->
-                expect(value).be.empty
-                collection.fetch().done ->
-                  mnemosyne.cacheRead(collection).done (value) ->
-                    expect(value).not.be.empty
-                  done()
 
 
       ###
@@ -511,10 +424,13 @@ module.exports = describe 'Mnemosyne specifications', ->
               +++++ OFFLINE +++++
   ###
   describe 'Offline', ->
-    beforeEach ->
+    before ->
       online = false
-      serverAutoRespondError()
+      serverSetOffline()
 
+    after ->
+      serverSetOnline()
+      
     describe 'Cache invalidation', ->
 
       it 'should trigger "syncing" event on model', (done) ->
@@ -548,8 +464,8 @@ module.exports = describe 'Mnemosyne specifications', ->
       ###
       describe 'Cache valid', ->
         beforeEach (done) ->
-          model.cache = {enabled : true, ttl: 600}
-          collection.cache = {enabled :true, ttl: 600}
+          model.cache = {enabled : true}
+          collection.cache = {enabled :true}
           model.setName("cacheModel")
           mnemosyne.cacheWrite(model)
           .done -> done()
@@ -588,74 +504,6 @@ module.exports = describe 'Mnemosyne specifications', ->
           .done ->
             expect(serverSpy).not.called
             done()
-
-      ###
-                  READ - OFFLINE - CACHE EXPIRED
-      ###
-      describe 'Cache expired', ->
-        beforeEach (done) ->
-          model.cache = {enabled : true, ttl: 0}
-          collection.cache = {enabled :true, ttl: 0}
-          model.setName("cacheModel")
-          mnemosyne.cacheWrite(model)
-          .done -> done()
-
-
-        it 'should trigger "synced" event on model', (done) ->
-          model.on 'synced', -> done()
-          model.fetch()
-
-        it 'should trigger "synced" event on collection', (done) ->
-          collection.on 'synced', -> done()
-          collection.fetch()
-
-        it 'should get data from cache when fetching model', (done) ->
-          model.setName("")
-          model.fetch()
-          .done ->
-            expect(model.getName()).equal("cacheModel")
-            done()
-
-        it 'should get data from cache when fetching collection', (done) ->
-          collection.reset([])
-          collection.fetch()
-          .done ->
-            expect(collection.models.length).to.equal(1)
-            done()
-
-
-        ###
-                    READ - OFFLINE - CACHE EXPIRED - "allowExpiredCache : false"
-        ###
-        describe '"allowExpiredCache" set to false', ->
-          beforeEach ->
-            model.cache.allowExpiredCache = false
-            collection.cache.allowExpiredCache = false
-
-          it 'should trigger "unsynced" event on model', (done) ->
-            model.on "unsynced", -> done()
-            model.fetch()
-
-          it 'should trigger "unsynced" event on collection', (done) ->
-            completed = false
-            collection.on "unsynced", -> completed = true
-            collection.fetch().always ->
-              expect(completed).to.be.true
-              done()
-
-          it 'should not use data from cache when fetching model and fail', (done) ->
-            model.setName("noName")
-            model.fetch()
-            .fail ->
-              expect(model.getName()).equal("noName")
-              done()
-
-          it 'should not use data from cache when fetching collection and fail', (done) ->
-            collection.reset([model])
-            collection.fetch()
-            .fail ->
-              expect(collection.models.length).equal(1)
-              done()
 
       ###
                   READ - OFFLINE - NO CACHE

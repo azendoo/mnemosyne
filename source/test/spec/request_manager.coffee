@@ -6,11 +6,8 @@ module.exports = describe 'Request Manager specifications', ->
   model2 = null
   model3 = null
   serverSpy = null
-  online = true
-
 
   RequestManager = require '../../app/request_manager'
-  ConnectionManager = require '../../app/connection_manager'
   Backbone       = require 'backbone'
 
 
@@ -31,8 +28,6 @@ module.exports = describe 'Request Manager specifications', ->
       onSynced    : (request) -> request.model.finishSync()
       onPending   : (request) -> request.model.pendingSync()
       onCancelled : (request) -> request.model.unsync()
-      ,
-      new ConnectionManager(-> online)
 
     class CustomModel extends Backbone.Model
       cache:
@@ -66,6 +61,12 @@ module.exports = describe 'Request Manager specifications', ->
     setUpServerResponse()
     server.autoRespond = true
 
+  serverSetOffline = ->
+    sinon.stub(Backbone, 'sync', -> $.Deferred().reject(readyState: 0))
+
+  serverSetOnline = ->
+    Backbone.sync.restore()
+
 
   describe 'Spec clear', ->
     it 'should stop the scheduler when the queue is empty', (done) ->
@@ -79,41 +80,11 @@ module.exports = describe 'Request Manager specifications', ->
         expect(requestManager.timeout).to.not.exist
         done()
 
-    it 'should reset the time interval when the queue is empty', (done) ->
-      expect(requestManager.interval).to.equal(125)
-
-      serverAutoRespondError()
-      requestManager.sync({method: 'create', model: model1})
-      .always ->
-        setTimeout((->
-          expect(requestManager.interval).to.be.above(125)
-          requestManager.clear()
-          expect(requestManager.interval).to.equal(125)
-          done()),250)
-
   describe 'Database persistence', ->
 
-    it 'should save the queue in db', (done) ->
-      serverAutoRespondError()
-      $.when(
-        requestManager.sync({method: 'create', model: model1}),
-        requestManager.sync({method: 'create', model: model2}),
-        requestManager.sync({method: 'create', model: model3})
-      ).done ->
-        expect(JSON.parse(localStorage.getItem('mnemosyne.pendingRequests.orderedKeys')).length).to.equal(3)
-        expect(Object.keys(JSON.parse(localStorage.getItem('mnemosyne.pendingRequests.dict'))).length).to.equal(3)
-        done()
+    it 'should save the queue in db'
+    it 'should load and try sync when db storage is not empty'
 
-    it 'should load and try sync when db storage is not empty', (done) ->
-      serverAutoRespondError()
-      $.when(
-        requestManager.sync({method: 'create', model: model1}),
-        requestManager.sync({method: 'create', model: model2}),
-        requestManager.sync({method: 'create', model: model3})
-      ).done ->
-        reqManager = new RequestManager()
-        expect(reqManager.getPendingRequests().length).to.equal(3)
-        done()
 
   ###
               +++++ ONLINE +++++
@@ -164,9 +135,14 @@ module.exports = describe 'Request Manager specifications', ->
   ###
   describe 'Offline', ->
     beforeEach ->
-      online = false
       model1.beginSync()
-      serverAutoRespondError()
+
+    before ->
+      serverSetOffline()
+
+    after ->
+      serverSetOnline()
+
     ###
                 OFFLINE - CACHE enabled
     ###
@@ -259,7 +235,6 @@ module.exports = describe 'Request Manager specifications', ->
       describe 'Spec smart request', ->
         beforeEach ->
           requestManager.clear()
-          serverAutoRespondError()
 
         it 'should cancel the request if a destroy is pending after a create', (done) ->
           $.when(

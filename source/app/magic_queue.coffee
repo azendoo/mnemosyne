@@ -24,17 +24,6 @@ module.exports = class MagicQueue
   # Store all value with constant access.
   dict: {}
 
-  constructor: (@key= DEFAULT_STORAGE_KEY, onRestore) ->
-    # Load the queue from localStorage
-    # @orderedKeys = JSON.parse(localStorage.getItem(@key + '.orderedKeys')) or []
-    # @dict        = JSON.parse(localStorage.getItem(@key + '.dict'))        or {}
-
-    # Apply the `onRestore` fun on each restored elements
-    # if typeof onRestore is 'function'
-      # _.map(@dict, onRestore)
-
-
-
   addHead: (key, value) ->
     @retrieveItem(key)
     @orderedKeys.push(key)

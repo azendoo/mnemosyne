@@ -28,13 +28,11 @@ dbSync = function(ctx) {};
 DEFAULT_STORAGE_KEY = 'mnemosyne.pendingRequests';
 
 module.exports = MagicQueue = (function() {
+  function MagicQueue() {}
+
   MagicQueue.prototype.orderedKeys = [];
 
   MagicQueue.prototype.dict = {};
-
-  function MagicQueue(key, onRestore) {
-    this.key = key != null ? key : DEFAULT_STORAGE_KEY;
-  }
 
   MagicQueue.prototype.addHead = function(key, value) {
     this.retrieveItem(key);
@@ -132,12 +130,11 @@ define('../app/utils',['require','exports','module'],function (require, exports,
 module.exports = Utils = (function() {
   function Utils() {}
 
-  Utils.isOnline = function() {
-    if (window.device && (window.navigator.connection != null)) {
-      return window.navigator.connection.type !== Connection.NONE;
-    } else {
-      return window.navigator.onLine;
+  Utils.debug = function(context, message) {
+    if (!window.DEBUG_MNEMOSYNE) {
+      return;
     }
+    return console.debug("[" + context + "] " + message);
   };
 
   Utils.addWithoutDuplicates = function(array, model) {
@@ -189,11 +186,13 @@ module.exports = Utils = (function() {
 
 });
 
-define('../app/request_manager',['require','exports','module','../app/magic_queue','../app/utils'],function (require, exports, module) {var MAX_INTERVAL, MIN_INTERVAL, MagicQueue, RequestManager, Utils, clearTimer, consumeRequests, defaultCallbacks, enqueueRequest, getMethod, initRequest, onSendFail, onSendSuccess, optimizeRequest, requestsEmpty, sendRequest;
+define('../app/request_manager',['require','exports','module','../app/magic_queue','../app/utils'],function (require, exports, module) {var MAX_INTERVAL, MIN_INTERVAL, MagicQueue, RequestManager, Utils, clearTimer, consumeRequests, debug, defaultCallbacks, enqueueRequest, getMethod, initRequest, onSendFail, onSendSuccess, optimizeRequest, requestsEmpty, sendRequest;
 
 MagicQueue = require("../app/magic_queue");
 
 Utils = require("../app/utils");
+
+debug = Utils.debug;
 
 MAX_INTERVAL = 2000;
 
@@ -212,7 +211,7 @@ getMethod = function(request) {
 };
 
 requestsEmpty = function(request) {
-  return Object.keys(request.methods).length === 0;
+  return _.isEmpty(Object.keys(request.methods));
 };
 
 initRequest = function(ctx, req) {
@@ -262,9 +261,9 @@ consumeRequests = function(ctx) {
     clearTimer(ctx);
     return;
   }
-  return ctx.timeout = setTimeout(function() {
+  return ctx.timeout = setTimeout((function() {
     return sendRequest(ctx, request);
-  }, ctx.interval);
+  }), ctx.interval);
 };
 
 onSendFail = function(ctx, request, method, error) {
@@ -285,6 +284,7 @@ onSendFail = function(ctx, request, method, error) {
         cancelRequest();
         break;
       default:
+        delete request.options.xhr;
         enqueueRequest(ctx, request);
         ctx.callbacks.onPending(request, method);
         request.deferred.resolve(model.attributes);
@@ -301,7 +301,6 @@ onSendSuccess = function(ctx, request, method, data) {
   delete request.methods[method];
   ctx.interval = MIN_INTERVAL;
   if (requestsEmpty(request)) {
-    ctx.pendingRequests.retrieveItem(request.key);
     ctx.callbacks.onSynced(request, method, data);
     request.deferred.resolve(data);
   } else {
@@ -311,27 +310,17 @@ onSendSuccess = function(ctx, request, method, data) {
 };
 
 sendRequest = function(ctx, request) {
-  var method, model, options, pendingId;
+  var method, model, options;
   method = getMethod(request);
   model = request.model;
-  if (method == null) {
-    console.warn("DEBUG -- no method in sendRequest");
-    return onSendSuccess(ctx, request, request.method, null);
-  }
-  if (!ctx.connectionManager.isOnline()) {
-    onSendFail(ctx, request, method, 0);
-  } else {
-    pendingId = model.attributes["pending_id"];
-    delete model.attributes["pending_id"];
-    options = request.methods[method];
-    return Backbone.sync(method, model, options).done(function(data) {
-      model.attributes["pending_id"] = pendingId;
-      return onSendSuccess(ctx, request, method, data);
-    }).fail(function(error) {
-      model.attributes["pending_id"] = pendingId;
-      return onSendFail(ctx, request, method, error);
-    });
-  }
+  options = request.methods[method];
+  Backbone.sync(method, model, options).done(function(data) {
+    debug("sendRequest", "success");
+    return onSendSuccess(ctx, request, method, data);
+  }).fail(function(error) {
+    debug("sendRequest", "fail");
+    return onSendFail(ctx, request, method, error);
+  });
 };
 
 optimizeRequest = function(ctx, request) {
@@ -350,10 +339,9 @@ defaultCallbacks = {
 };
 
 module.exports = RequestManager = (function() {
-  function RequestManager(callbacks, connectionManager) {
+  function RequestManager(callbacks) {
     var onRestore;
     this.callbacks = callbacks != null ? callbacks : {};
-    this.connectionManager = connectionManager;
     _.defaults(this.callbacks, defaultCallbacks);
     onRestore = function(request) {
       request.model = new Backbone.Model(request.model);
@@ -530,84 +518,7 @@ module.exports = SyncMachine;
 
 });
 
-define('../app/connection_manager',['require','exports','module','../app/utils'],function (require, exports, module) {var ConnectionManager, Utils,
-  __bind = function(fn, me){ return function(){ return fn.apply(me, arguments); }; };
-
-Utils = require("../app/utils");
-
-
-/*
-  Watch the connection, providing callbacks on connection lost and recovered
- */
-
-module.exports = ConnectionManager = (function() {
-  var _CHECK_INTERVAL;
-
-  _CHECK_INTERVAL = 1000;
-
-  ConnectionManager.prototype._connectionLostCallbacks = {};
-
-  ConnectionManager.prototype._connectionRecoveredCallbacks = {};
-
-  function ConnectionManager(isOnline) {
-    this.isOnline = isOnline != null ? isOnline : Utils.isOnline;
-    this._watchConnection = __bind(this._watchConnection, this);
-    this._watchConnection();
-    this.onLine = this.isOnline();
-  }
-
-  ConnectionManager.prototype._watchConnection = function() {
-    if (this.isOnline() && !this.onLine) {
-      _.map(this._connectionRecoveredCallbacks, function(callback) {
-        var e;
-        try {
-          return callback(true);
-        } catch (_error) {
-          e = _error;
-          return console.error("Cannot call ", callback);
-        }
-      });
-    } else if (!this.isOnline() && this.onLine) {
-      _.map(this._connectionLostCallbacks, function(callback) {
-        var e;
-        try {
-          return callback(false);
-        } catch (_error) {
-          e = _error;
-          return console.error("Cannot call ", callback);
-        }
-      });
-    }
-    this.onLine = this.isOnline();
-    return setTimeout(this._watchConnection, _CHECK_INTERVAL);
-  };
-
-  ConnectionManager.prototype.subscribe = function(event, key, callback) {
-    if (typeof key !== 'string' || typeof callback !== 'function') {
-      return;
-    }
-    switch (event) {
-      case 'connectionLost':
-        return this._connectionLostCallbacks[key] = callback;
-      case 'connectionRecovered':
-        return this._connectionRecoveredCallbacks[key] = callback;
-      default:
-        return console.warn('No callback for ', event);
-    }
-  };
-
-  ConnectionManager.prototype.unsubscribe = function(key) {
-    delete this._connectionLostCallbacks[key];
-    return delete this._connectionRecoveredCallbacks[key];
-  };
-
-  return ConnectionManager;
-
-})();
-
-});
-
-define('mnemosyne',['require','exports','module','../app/request_manager','../app/sync_machine','../app/utils','../app/connection_manager'],function (require, exports, module) {var ConnectionManager, Mnemosyne, MnemosyneCollection, MnemosyneModel, RequestManager, SyncMachine, Utils, addToCache, defaultCacheOptions, defaultOptions, initRequest, read, removeFromCache, removeFromCollectionCache, removeFromParentsCache, serverRead, updateCollectionCache, updateParentsCache, validCacheValue, wipeCache, _destroy;
+define('mnemosyne',['require','exports','module','../app/request_manager','../app/sync_machine','../app/utils'],function (require, exports, module) {var MNEMOSYNE_DB_VERSION, Mnemosyne, MnemosyneCollection, MnemosyneModel, RequestManager, SyncMachine, Utils, addToCache, checkVersion, debug, defaultCacheOptions, defaultOptions, initRequest, read, removeFromCache, removeFromCollectionCache, removeFromParentsCache, serverRead, updateCollectionCache, updateParentsCache, wipeCache, _destroy;
 
 RequestManager = require("../app/request_manager");
 
@@ -615,7 +526,19 @@ SyncMachine = require("../app/sync_machine");
 
 Utils = require("../app/utils");
 
-ConnectionManager = require("../app/connection_manager");
+debug = Utils.debug;
+
+MNEMOSYNE_DB_VERSION = 1;
+
+checkVersion = function(ctx) {
+  return Utils.store.getItem("MNEMOSYNE_DB_VERSION").done(function(previousBaseVersion) {
+    if (previousBaseVersion < MNEMOSYNE_DB_VERSION) {
+      return wipeCache(ctx);
+    }
+  }).fail(function() {
+    return wipeCache(ctx);
+  });
+};
 
 initRequest = function(method, model, options) {
   var enabled, request, _ref;
@@ -639,6 +562,7 @@ initRequest = function(method, model, options) {
 
 wipeCache = function(ctx) {
   var backup, deferred, deferredArray;
+  console.log("Mnemosyne: wipe cache");
   deferred = $.Deferred();
   backup = [];
   deferredArray = _.map(ctx.protectedKeys, function(protectedKey) {
@@ -656,6 +580,7 @@ wipeCache = function(ctx) {
   $.when(deferredArray).then(function() {
     return Utils.store.clear().done(function() {
       var val, _i, _len;
+      Utils.store.setItem("MNEMOSYNE_DB_VERSION", MNEMOSYNE_DB_VERSION);
       for (_i = 0, _len = backup.length; _i < _len; _i++) {
         val = backup[_i];
         Utils.store.setItem(val.key, val.value);
@@ -670,57 +595,30 @@ wipeCache = function(ctx) {
 };
 
 read = function(ctx, request) {
-  var deferred, model;
+  var deferred;
   deferred = $.Deferred();
-  model = request.model;
-  if (!request.cacheEnabled) {
-    return serverRead(ctx, request, deferred);
-  }
-  Utils.store.getItem(request.key).done(function(value) {
-    return validCacheValue(ctx, request, value, deferred);
+  serverRead(ctx, request).done(function() {
+    debug("read", "success");
+    return deferred.resolve.apply(this, arguments);
   }).fail(function() {
-    return serverRead(ctx, request, deferred);
+    var args;
+    debug("read", "fail");
+    args = arguments;
+    return ctx.cacheRead(request.key).done(function() {
+      return deferred.resolve.apply(this, arguments);
+    }).fail(function() {
+      return deferred.reject.apply(this, args);
+    });
   });
   return deferred;
 };
 
-validCacheValue = function(ctx, request, value, deferred) {
-  var model, _base, _base1;
-  model = request.model;
-  if (request.options.forceRefresh) {
-    return serverRead(ctx, request, deferred);
-  } else if (value.expirationDate < new Date().getTime()) {
-    if (model.cache.allowExpiredCache && (value != null)) {
-      if (typeof (_base = request.options).success === "function") {
-        _base.success(value.data, 'success', null);
-      }
-      deferred.resolve(value.data);
-    }
-    return serverRead(ctx, request, deferred);
-  } else {
-    if (typeof (_base1 = request.options).success === "function") {
-      _base1.success(value.data, 'success', null);
-    }
-    return deferred.resolve(value.data);
-  }
-};
-
-serverRead = function(ctx, request, deferred) {
-  console.log("Sync from server");
-  if (!ctx.isOnline()) {
-    console.log('No connection');
-    deferred.reject();
-  }
-  return Backbone.sync('read', request.model, request.options).done(function() {
-    var data;
-    data = arguments;
-    console.log("Succeed sync from server");
-    return addToCache(ctx, request, data[0]).always(function() {
-      return deferred.resolve.apply(this, data);
-    });
+serverRead = function(ctx, request) {
+  return Backbone.sync('read', request.model, request.options).done(function(value) {
+    debug("serverRead", "success");
+    return addToCache(ctx, request, value);
   }).fail(function() {
-    console.log("Fail sync from server", arguments);
-    return deferred.reject.apply(this, arguments);
+    return debug("serverRead", "fail");
   }).always(function() {
     return request.model.trigger('sync:args', arguments[0], arguments[1], arguments[2]);
   });
@@ -732,7 +630,7 @@ removeFromCollectionCache = function(ctx, request, collectionKey) {
   model = request.model;
   Utils.store.getItem(collectionKey).done(function(value) {
     var models;
-    models = value.data;
+    models = value;
     if (model.get('pending_id')) {
       models = _.filter(models, function(m) {
         return m.pending_id !== model.get('pending_id');
@@ -743,10 +641,7 @@ removeFromCollectionCache = function(ctx, request, collectionKey) {
         return m.id !== model.get('id');
       });
     }
-    return Utils.store.setItem(collectionKey, {
-      "data": models,
-      "expirationDate": value.expirationDate
-    }).done(function() {
+    return Utils.store.setItem(collectionKey, models).done(function() {
       return deferred.resolve();
     }).fail(function() {
       return onDataBaseError(ctx);
@@ -803,7 +698,7 @@ updateCollectionCache = function(ctx, request, collectionKey) {
   model = request.model;
   Utils.store.getItem(collectionKey).done(function(value) {
     var models, parentModel;
-    models = value.data;
+    models = value;
     if (model.get('pending_id')) {
       parentModel = _.findWhere(models, {
         "pending_id": model.get('pending_id')
@@ -818,20 +713,14 @@ updateCollectionCache = function(ctx, request, collectionKey) {
     } else {
       models.unshift(model.attributes);
     }
-    return Utils.store.setItem(collectionKey, {
-      "data": models,
-      "expirationDate": 0
-    }).done(function() {
+    return Utils.store.setItem(collectionKey, models).done(function() {
       return deferred.resolve();
     }).fail(function() {
       wipeCache(ctx);
       return deferred.reject();
     });
   }).fail(function() {
-    return Utils.store.setItem(collectionKey, {
-      "data": [model.attributes],
-      "expirationDate": 0
-    }).done(function() {
+    return Utils.store.setItem(collectionKey, [model.attributes]).done(function() {
       return deferred.resolve();
     }).fail(function() {
       wipeCache(ctx);
@@ -869,13 +758,12 @@ updateParentsCache = function(ctx, request) {
 };
 
 addToCache = function(ctx, request, data) {
-  var deferred, expiredDate, model;
+  var deferred, model, _ref;
   deferred = $.Deferred();
   model = request.model;
   if (!request.cacheEnabled) {
     return deferred.resolve();
   }
-  expiredDate = (new Date()).getTime() + model.cache.ttl * 1000;
   if (model instanceof Backbone.Model) {
     if (data == null) {
       data = model.attributes;
@@ -886,19 +774,21 @@ addToCache = function(ctx, request, data) {
         return m.attributes;
       });
     }
+    if (((_ref = request.options.data) != null ? _ref.page : void 0) > 1) {
+      console.warn('Attempting to save page > 1');
+      return deferred.resolve();
+    }
   } else {
     console.warn("Wrong instance for ", model);
     return deferred.reject();
   }
-  Utils.store.setItem(request.key, {
-    "data": data,
-    "expirationDate": expiredDate
-  }).done(function() {
-    console.log("Succeed cache write");
+  Utils.store.setItem(request.key, data).done(function() {
+    debug("addToCache", "success");
     return updateParentsCache(ctx, request).always(function() {
       return deferred.resolve();
     });
   }).fail(function() {
+    debug("addToCache", "fail");
     wipeCache(ctx);
     return deferred.reject();
   });
@@ -915,17 +805,13 @@ defaultOptions = {
 };
 
 defaultCacheOptions = {
-  enabled: false,
-  ttl: 0,
-  allowExpiredCache: true
+  enabled: false
 };
 
 module.exports = Mnemosyne = (function() {
   var _context;
 
   Mnemosyne.prototype._requestManager = null;
-
-  Mnemosyne.prototype._connectionManager = null;
 
   _context = null;
 
@@ -934,7 +820,6 @@ module.exports = Mnemosyne = (function() {
       options = {};
     }
     this.protectedKeys = options.protectedKeys || [];
-    this._connectionManager = new ConnectionManager(options.isOnline);
     this._requestManager = new RequestManager({
       onSynced: function(request, method, data) {
         var model;
@@ -977,8 +862,9 @@ module.exports = Mnemosyne = (function() {
         }
         return model.unsync();
       }
-    }, this._connectionManager);
+    });
     _context = this;
+    checkVersion(_context);
   }
 
 
@@ -1008,19 +894,8 @@ module.exports = Mnemosyne = (function() {
    */
 
   Mnemosyne.prototype.cacheRead = function(key) {
-    var deferred, model;
     if (key instanceof Backbone.Model || key instanceof Backbone.Collection) {
-      model = key;
-      deferred = $.Deferred();
-      if (typeof model.getKey !== 'function') {
-        return deferred.reject();
-      }
-      Utils.store.getItem(model.getKey()).done(function(value) {
-        return deferred.resolve(value.data);
-      }).fail(function() {
-        return deferred.reject();
-      });
-      return deferred;
+      key = key.getKey();
     }
     return Utils.store.getItem(key);
   };
@@ -1111,10 +986,14 @@ module.exports = Mnemosyne = (function() {
     model.cache = _.defaults(model.cache || {}, defaultCacheOptions);
     model.beginSync();
     request = initRequest(method, model, options);
-    console.log("\n---" + request.key);
+    debug("sync", request.key);
     switch (method) {
       case 'read':
         read(_context, request).done(function() {
+          var _ref;
+          if ((_ref = options.success) != null) {
+            _ref.apply(this, arguments);
+          }
           model.finishSync();
           return deferred.resolve.apply(this, arguments);
         }).fail(function() {
@@ -1130,35 +1009,6 @@ module.exports = Mnemosyne = (function() {
         deferred = _context._requestManager.sync(request);
     }
     return deferred;
-  };
-
-
-  /*
-    Allow you to register a callback on severals events
-    The `key` is to provide easier unsubcription when using
-    anonymous function.
-   */
-
-  Mnemosyne.prototype.subscribe = function(event, key, callback) {
-    return _context._connectionManager.subscribe(event, key, callback);
-  };
-
-
-  /*
-    Allow you to unregister a callback for a given key
-   */
-
-  Mnemosyne.prototype.unsubscribe = function(key) {
-    return _context._connectionManager.unsubscribe(event, key);
-  };
-
-
-  /*
-    return a boolean
-   */
-
-  Mnemosyne.prototype.isOnline = function() {
-    return _context._connectionManager.isOnline();
   };
 
   Mnemosyne.SyncMachine = SyncMachine;

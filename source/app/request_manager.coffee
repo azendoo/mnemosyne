@@ -1,5 +1,6 @@
 MagicQueue = require "../app/magic_queue"
 Utils      = require "../app/utils"
+debug      = Utils.debug
 
 # localforage = require "localforage"
 # Backbone = require "backbone"
@@ -9,6 +10,7 @@ Utils      = require "../app/utils"
 
 MAX_INTERVAL= 2000  # 2 seconds
 MIN_INTERVAL= 125   # 125ms
+
 
 
 # Helper to get the first action to perform
@@ -25,7 +27,7 @@ getMethod= (request) ->
 
 # Helper to know if the request is empty, ie all actions have been performed
 requestsEmpty = (request) ->
-  return Object.keys(request.methods).length is 0
+  return _.isEmpty(Object.keys(request.methods))
 
 
 # Store all needed information into a request object
@@ -67,11 +69,7 @@ consumeRequests = (ctx) ->
   if not request?
     clearTimer(ctx)
     return
-
-  ctx.timeout = setTimeout(
-    ->
-      sendRequest(ctx, request)
-    ctx.interval)
+  ctx.timeout = setTimeout((-> sendRequest(ctx, request)), ctx.interval)
 
 
 onSendFail = (ctx, request, method, error) ->
@@ -89,6 +87,7 @@ onSendFail = (ctx, request, method, error) ->
       when 4, 5
         cancelRequest()
       else
+        delete request.options.xhr
         enqueueRequest(ctx, request)
         ctx.callbacks.onPending(request, method)
         request.deferred.resolve(model.attributes)
@@ -103,7 +102,6 @@ onSendSuccess = (ctx, request, method, data) ->
   delete request.methods[method]
   ctx.interval = MIN_INTERVAL
   if requestsEmpty(request)
-    ctx.pendingRequests.retrieveItem(request.key)
     ctx.callbacks.onSynced(request, method, data)
     request.deferred.resolve(data)
   else
@@ -116,32 +114,18 @@ sendRequest = (ctx, request) ->
   method  = getMethod(request)
   model = request.model
 
-  # -- DEBUG --
-  if not method?
-    console.warn "DEBUG -- no method in sendRequest"
-    return onSendSuccess(ctx, request, request.method, null)
+  options = request.methods[method]
 
-  if not ctx.connectionManager.isOnline()
-    onSendFail(ctx, request, method, 0)
-    return
+  Backbone.sync(method, model, options)
+  .done (data) ->
+    debug("sendRequest", "success")
+    onSendSuccess(ctx, request, method, data)
 
-  else
-    # Save and clean pending id before sync
-    pendingId = model.attributes["pending_id"]
-    delete model.attributes["pending_id"]
+  .fail (error) ->
+    debug("sendRequest", "fail")
+    onSendFail(ctx, request, method, error)
 
-    options = request.methods[method]
-
-    Backbone.sync(method, model, options)
-    .done (data) ->
-      # Restore pending id
-      model.attributes["pending_id"] = pendingId
-      onSendSuccess(ctx, request, method, data)
-
-    .fail (error) ->
-      model.attributes["pending_id"] = pendingId
-      onSendFail(ctx, request, method, error)
-
+  return
 
 # Make the request fit avoiding useless actions such as [create -> delete]
 optimizeRequest = (ctx, request) ->
@@ -164,7 +148,7 @@ module.exports = class RequestManager
 
   # You can give 3 differents callbacks: `onSynced`, `onPending`
   # and `onCancelled`
-  constructor: (@callbacks={}, @connectionManager) ->
+  constructor: (@callbacks={}) ->
     _.defaults(@callbacks, defaultCallbacks)
 
     onRestore = (request) ->
