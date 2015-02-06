@@ -79,7 +79,7 @@ onSendFail = (ctx, request, method, error) ->
 
   cancelRequest = ->
     ctx.callbacks.onCancelled(request)
-    ctx.pendingRequests.retrieveHead()
+    ctx.pendingRequests.retrieveHead(request.key)
     request.deferred.reject()
 
   if model.cache.enabled
@@ -104,6 +104,7 @@ onSendSuccess = (ctx, request, method, data) ->
   ctx.interval = MIN_INTERVAL
   if requestsEmpty(request)
     ctx.callbacks.onSynced(request, method, data)
+    ctx.pendingRequests.retrieveHead(request.key)
     request.deferred.resolve(data)
   else
     enqueueRequest(ctx, request)

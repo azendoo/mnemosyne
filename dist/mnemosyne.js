@@ -14,7 +14,7 @@ define('../app/magic_queue',['require','exports','module'],function (require, ex
 /*
   - MagicQueue -
  */
-var DEFAULT_STORAGE_KEY, MagicQueue, dbSync, removeValue;
+var DEFAULT_STORAGE_KEY, MagicQueue, removeValue;
 
 removeValue = function(ctx, key) {
   var value;
@@ -22,8 +22,6 @@ removeValue = function(ctx, key) {
   delete ctx.dict[key];
   return value;
 };
-
-dbSync = function(ctx) {};
 
 DEFAULT_STORAGE_KEY = 'mnemosyne.pendingRequests';
 
@@ -37,15 +35,13 @@ module.exports = MagicQueue = (function() {
   MagicQueue.prototype.addHead = function(key, value) {
     this.retrieveItem(key);
     this.orderedKeys.push(key);
-    this.dict[key] = value;
-    return dbSync(this);
+    return this.dict[key] = value;
   };
 
   MagicQueue.prototype.addTail = function(key, value) {
     this.retrieveItem(key);
     this.orderedKeys.unshift(key);
-    this.dict[key] = value;
-    return dbSync(this);
+    return this.dict[key] = value;
   };
 
   MagicQueue.prototype.getHead = function() {
@@ -74,7 +70,6 @@ module.exports = MagicQueue = (function() {
     }
     key = this.orderedKeys.pop();
     value = removeValue(this, key);
-    dbSync(this);
     return value;
   };
 
@@ -85,7 +80,6 @@ module.exports = MagicQueue = (function() {
     }
     key = this.orderedKeys.shift();
     value = removeValue(this, key);
-    dbSync(this);
     return value;
   };
 
@@ -97,7 +91,6 @@ module.exports = MagicQueue = (function() {
     indexKey = this.orderedKeys.indexOf(key);
     this.orderedKeys.splice(indexKey, 1);
     value = removeValue(this, key);
-    dbSync(this);
     return value;
   };
 
@@ -115,8 +108,7 @@ module.exports = MagicQueue = (function() {
 
   MagicQueue.prototype.clear = function() {
     this.orderedKeys = [];
-    this.dict = {};
-    return dbSync(this);
+    return this.dict = {};
   };
 
   return MagicQueue;
@@ -274,7 +266,7 @@ onSendFail = function(ctx, request, method, error) {
   }
   cancelRequest = function() {
     ctx.callbacks.onCancelled(request);
-    ctx.pendingRequests.retrieveItem(request.key);
+    ctx.pendingRequests.retrieveHead(request.key);
     return request.deferred.reject();
   };
   if (model.cache.enabled) {
@@ -303,6 +295,7 @@ onSendSuccess = function(ctx, request, method, data) {
   ctx.interval = MIN_INTERVAL;
   if (requestsEmpty(request)) {
     ctx.callbacks.onSynced(request, method, data);
+    ctx.pendingRequests.retrieveHead(request.key);
     request.deferred.resolve(data);
   } else {
     enqueueRequest(ctx, request);
