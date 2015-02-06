@@ -79,6 +79,7 @@ onSendFail = (ctx, request, method, error) ->
 
   cancelRequest = ->
     ctx.callbacks.onCancelled(request)
+    ctx.pendingRequests.retrieveItem(request.key)
     request.deferred.reject()
 
   if model.cache.enabled

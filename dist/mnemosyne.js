@@ -274,6 +274,7 @@ onSendFail = function(ctx, request, method, error) {
   }
   cancelRequest = function() {
     ctx.callbacks.onCancelled(request);
+    ctx.pendingRequests.retrieveItem(request.key);
     return request.deferred.reject();
   };
   if (model.cache.enabled) {
